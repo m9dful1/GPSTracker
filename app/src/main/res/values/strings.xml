@@ -1,3 +1,16 @@
 <resources>
     <string name="app_name">GPS Tracker</string>
+    <string name="navigation_fab_description">Navigate to destination</string>
+    <string name="tour_mode_fab_description">Activate Tour Mode</string>
+    <string name="enter_destination">Enter Destination</string>
+    <string name="destination_hint">Destination</string>
+    <string name="navigate_button">Navigate</string>
+    <string name="cancel_button">Cancel</string>
+    <string name="navigating_to">Navigating to %s</string>
+    <string name="eta_calculating">Calculating ETA…</string>
+    <string name="eta_format">ETA: %s</string>
+    <string name="distance_remaining">%s remaining</string>
+    <string name="calculating_route">Calculating route…</string>
+    <string name="start_navigation">Start Navigation</string>
+    <string name="end_navigation">End Navigation</string>
 </resources>

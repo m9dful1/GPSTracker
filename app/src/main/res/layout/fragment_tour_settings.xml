@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Tour Mode Settings"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Content Preferences Section -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Content Preferences"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Points of Interest Categories" />
+
+        <CheckBox
+            android:id="@+id/cb_category_historical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Historical" />
+
+        <CheckBox
+            android:id="@+id/cb_category_cultural"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Cultural" />
+
+        <CheckBox
+            android:id="@+id/cb_category_natural"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Natural" />
+            
+        <CheckBox
+            android:id="@+id/cb_category_architectural"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Architectural" />
+
+        <CheckBox
+            android:id="@+id/cb_category_entertainment"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Entertainment" />
+
+        <CheckBox
+            android:id="@+id/cb_category_dining"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Dining" />
+
+        <CheckBox
+            android:id="@+id/cb_category_shopping"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Shopping" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Content Detail Level"
+            android:layout_marginTop="8dp" />
+
+        <RadioGroup
+            android:id="@+id/rg_detail_level"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <RadioButton
+                android:id="@+id/rb_detail_brief"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Brief"
+                android:layout_weight="1" />
+
+            <RadioButton
+                android:id="@+id/rb_detail_medium"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Medium"
+                android:checked="true"
+                android:layout_weight="1" />
+
+            <RadioButton
+                android:id="@+id/rb_detail_detailed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Detailed"
+                android:layout_weight="1" />
+        </RadioGroup>
+
+        <!-- Audio Settings Section -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Audio Settings"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="8dp" />
+
+        <Switch
+            android:id="@+id/switch_audio_enabled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Audio Narration Enabled"
+            android:checked="true"
+            android:switchMinWidth="56dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Voice Speed"
+            android:layout_marginTop="8dp" />
+
+        <SeekBar
+            android:id="@+id/seekbar_voice_speed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="20"
+            android:progress="10" />
+
+        <TextView
+            android:id="@+id/tv_voice_speed_value"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="1.0x"
+            android:gravity="center" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Voice Pitch"
+            android:layout_marginTop="8dp" />
+
+        <SeekBar
+            android:id="@+id/seekbar_voice_pitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="20"
+            android:progress="10" />
+
+        <TextView
+            android:id="@+id/tv_voice_pitch_value"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="1.0x"
+            android:gravity="center" />
+
+        <Switch
+            android:id="@+id/switch_auto_play"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Auto-play Content When Approaching POIs"
+            android:checked="true"
+            android:switchMinWidth="56dp"
+            android:layout_marginTop="8dp" />
+
+        <!-- Notification Settings Section -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Notification Settings"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Notification Distance (meters)" />
+
+        <SeekBar
+            android:id="@+id/seekbar_notify_distance"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="500"
+            android:progress="200" />
+
+        <TextView
+            android:id="@+id/tv_notify_distance_value"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="200m"
+            android:gravity="center" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Max Notifications Per Hour"
+            android:layout_marginTop="8dp" />
+
+        <SeekBar
+            android:id="@+id/seekbar_max_notifications"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="30"
+            android:progress="10" />
+
+        <TextView
+            android:id="@+id/tv_max_notifications_value"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="10 per hour"
+            android:gravity="center" />
+
+        <!-- Battery Usage Section -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Battery Usage"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="8dp" />
+
+        <Switch
+            android:id="@+id/switch_prefetch_content"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Pre-fetch Content for Nearby POIs"
+            android:checked="true"
+            android:switchMinWidth="56dp" />
+
+        <Switch
+            android:id="@+id/switch_use_mobile_data"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Use Mobile Data for Content"
+            android:checked="false"
+            android:switchMinWidth="56dp"
+            android:layout_marginTop="8dp" />
+
+        <!-- Buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="24dp">
+
+            <Button
+                android:id="@+id/btn_cancel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Cancel"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp" />
+
+            <Button
+                android:id="@+id/btn_save"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Save"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView> 

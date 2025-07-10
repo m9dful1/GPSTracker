@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/turn_instruction_card"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="16dp"
+    app:cardCornerRadius="8dp"
+    app:cardElevation="8dp"
+    app:cardBackgroundColor="@android:color/white">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Header with close button -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="16dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Turn-by-Turn Navigation"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_centerVertical="true" />
+
+            <ImageButton
+                android:id="@+id/btn_close_turn_instruction"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_alignParentEnd="true"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Close"
+                android:src="@android:drawable/ic_menu_close_clear_cancel" />
+        </RelativeLayout>
+
+        <!-- Main content -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="16dp">
+
+            <!-- Maneuver icon -->
+            <TextView
+                android:id="@+id/tv_maneuver_icon"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_marginEnd="16dp"
+                android:background="@drawable/circle_background"
+                android:gravity="center"
+                android:textColor="@android:color/white"
+                android:textSize="30sp"
+                android:textStyle="bold"
+                tools:text="↱" />
+
+            <!-- Instruction text -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <!-- Primary instruction -->
+                <TextView
+                    android:id="@+id/tv_primary_instruction"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    tools:text="Turn right" />
+
+                <!-- Secondary instruction -->
+                <TextView
+                    android:id="@+id/tv_secondary_instruction"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="14sp"
+                    tools:text="in 200 meters" />
+
+                <!-- Street name -->
+                <TextView
+                    android:id="@+id/tv_street_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="14sp"
+                    android:textStyle="italic"
+                    tools:text="onto Main Street" />
+            </LinearLayout>
+
+            <!-- Distance -->
+            <TextView
+                android:id="@+id/tv_distance"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                tools:text="250 m" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Progress bar at the bottom -->
+    <ProgressBar
+        android:id="@+id/progress_approach"
+        style="@style/Widget.AppCompat.ProgressBar.Horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:layout_gravity="bottom"
+        android:max="100"
+        android:progress="75"
+        android:progressTint="@android:color/holo_blue_bright" />
+</androidx.cardview.widget.CardView> 

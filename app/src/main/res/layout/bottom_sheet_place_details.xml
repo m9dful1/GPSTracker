@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="16dp"
+    app:behavior_hideable="true"
+    app:behavior_peekHeight="128dp"
+    app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior">
+
+    <TextView
+        android:id="@+id/tv_place_name"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:textAppearance="?attr/textAppearanceHeadline6"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        tools:text="Coffee Shop" />
+
+    <TextView
+        android:id="@+id/tv_place_address"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textAppearance="?attr/textAppearanceBody2"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tv_place_name"
+        tools:text="123 Main Street, City, Country" />
+
+    <TextView
+        android:id="@+id/tv_place_category"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:textAppearance="?attr/textAppearanceCaption"
+        android:background="@android:color/darker_gray"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="2dp"
+        android:textColor="@android:color/white"
+        android:textAllCaps="true"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tv_place_address"
+        tools:text="CAFE" />
+
+    <RatingBar
+        android:id="@+id/rb_place_rating"
+        style="?android:attr/ratingBarStyleSmall"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:isIndicator="true"
+        android:numStars="5"
+        android:stepSize="0.1"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tv_place_category"
+        tools:rating="4.5" />
+
+    <TextView
+        android:id="@+id/tv_place_description"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:textAppearance="?attr/textAppearanceBody1"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/rb_place_rating"
+        tools:text="A description of this place and what makes it interesting to tourists." />
+
+    <!-- Audio Controls Group -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/card_audio_controls"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        app:cardCornerRadius="8dp"
+        app:cardElevation="2dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tv_place_description">
+
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="8dp">
+
+            <TextView
+                android:id="@+id/tv_audio_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:text="Audio Guide"
+                android:textAppearance="?attr/textAppearanceSubtitle1"
+                android:textStyle="bold"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
+            <LinearLayout
+                android:id="@+id/layout_audio_buttons"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal"
+                app:layout_constraintTop_toBottomOf="@id/tv_audio_title">
+
+                <Button
+                    android:id="@+id/btn_play_audio"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="1"
+                    android:text="Play" />
+
+                <Button
+                    android:id="@+id/btn_pause_audio"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="1"
+                    android:enabled="false"
+                    android:text="Pause" />
+
+                <Button
+                    android:id="@+id/btn_stop_audio"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:enabled="false"
+                    android:text="Stop" />
+            </LinearLayout>
+
+            <ProgressBar
+                android:id="@+id/progress_audio"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:visibility="invisible"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/layout_audio_buttons" />
+
+            <TextView
+                android:id="@+id/tv_audio_status"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:gravity="center"
+                android:text="Ready"
+                android:textAppearance="?attr/textAppearanceCaption"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/progress_audio" />
+        </androidx.constraintlayout.widget.ConstraintLayout>
+    </androidx.cardview.widget.CardView>
+
+    <Button
+        android:id="@+id/btn_voice_settings"
+        style="@style/Widget.MaterialComponents.Button.TextButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Voice Settings"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/card_audio_controls" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_mark_visited"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Mark as Visited"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/btn_voice_settings" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_add_notes"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="8dp"
+        android:text="Add Notes"
+        app:layout_constraintEnd_toStartOf="@id/btn_mark_visited"
+        app:layout_constraintTop_toBottomOf="@id/btn_voice_settings" />
+
+    <TextView
+        android:id="@+id/tv_user_notes_label"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Your Notes:"
+        android:textAppearance="?attr/textAppearanceSubtitle2"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/btn_mark_visited"
+        tools:visibility="visible" />
+
+    <TextView
+        android:id="@+id/tv_user_notes"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textAppearance="?attr/textAppearanceBody2"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tv_user_notes_label"
+        tools:text="These are my personal notes about this place."
+        tools:visibility="visible" />
+
+</androidx.constraintlayout.widget.ConstraintLayout> 

@@ -1,5 +1,5 @@
 <resources>
-    <style name="Theme.GPSTracker" parent="Theme.AppCompat.Light.NoActionBar">
+    <style name="Theme.GPSTracker" parent="Theme.MaterialComponents.Light.NoActionBar">
         <!-- Theme colors go here -->
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>

@@ -4,25 +4,58 @@
     <!-- Permissions for location access -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    
+    <!-- Permissions for audio playback -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    
+    <!-- Permissions for foreground service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
+        android:name=".GPSTrackerApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.GPSTracker">
 
-        <!-- Meta-data for the Google Maps API key -->
-        <meta-data
+        <!--
+          The API key is now managed securely and should be set programmatically if required.
+          See ApiKeyManager for details.
+        -->
+        <!-- <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="AIzaSyASDymHsKY9mAZ1-INzVhVskC7x4EVCPg0" />
+            android:value="YOUR_API_KEY" /> -->
 
         <activity
-            android:name=".MainActivity"
+            android:name="com.spiritwisestudios.gpstracker.MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        
+        <!-- Tour Mode Service -->
+        <service
+            android:name=".service.TourModeService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+            
+        <!-- Geofence Broadcast Receiver -->
+        <receiver
+            android:name=".receiver.GeofenceBroadcastReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.spiritwisestudios.gpstracker.ACTION_GEOFENCE_TRANSITION" />
+                <action android:name="com.google.android.gms.location.GEOFENCE_TRANSITION" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

@@ -1,0 +1,72 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+All generated code must comply with the following rules, each derived from the key principles in “Clean Code”:
+	1.	Meaningful Naming
+	•	Rule: Every variable, function, class, and module must have clear, descriptive names that convey purpose and intent.
+	•	Implementation: Avoid abbreviations and ambiguous names. Names should be self-explanatory so that someone reading the code understands its intent without relying on external documentation.
+	2.	Function and Method Clarity
+	•	Rule: Each function or method must be small, focused, and perform a single well-defined task.
+	•	Implementation:
+	•	Keep functions short and minimize side effects.
+	•	Strive to have only one level of abstraction per function.
+	•	Ensure that functions follow the Single Responsibility Principle so that changes to one functionality do not affect others.
+	3.	Effective Commenting and Self-Documentation
+	•	Rule: Use comments judiciously to explain “why” something is done rather than “what” is done; code should be self-documenting.
+	•	Implementation:
+	•	Write code that is clear enough to require minimal commentary.
+	•	Reserve comments for clarifying intent, complex decisions, or non-obvious workarounds.
+	4.	Consistent Formatting and Style
+	•	Rule: Code must be uniformly formatted and styled according to a clearly defined style guide.
+	•	Implementation:
+	•	Apply consistent indentation, spacing, and layout.
+	•	Ensure that style conventions (such as naming conventions and bracket placement) are consistently enforced throughout the project to enhance readability.
+	5.	Robust Error Handling and Exception Management
+	•	Rule: All potential error conditions must be anticipated and explicitly managed.
+	•	Implementation:
+	•	Favor exceptions over error codes, and catch exceptions where appropriate.
+	•	Log or otherwise communicate error conditions in a way that aids debugging and maintains system stability.
+	6.	DRY (Don’t Repeat Yourself)
+	•	Rule: Avoid duplication across the codebase by abstracting repeated logic and information into singular, centralized modules or functions.
+	•	Implementation:
+	•	Recognize code patterns that repeat and refactor them into reusable components.
+	•	Maintain a single source of truth to reduce bugs and simplify maintenance.
+	7.	Modularization and Separation of Concerns
+	•	Rule: Each module, class, or function should have a single responsibility and should not mix different concerns or responsibilities.
+	•	Implementation:
+	•	Design components with well-defined boundaries that limit dependencies on other parts of the system.
+	•	This promotes maintainability and simplifies testing by isolating functionality.
+	8.	Design for Testability and Maintainability
+	•	Rule: All code must be structured to facilitate straightforward testing and easy long-term maintenance.
+	•	Implementation:
+	•	Write unit tests for every module and function.
+	•	Employ dependency injection and other design techniques to ensure that code can be easily tested in isolation.
+	9.	Adherence to SOLID Principles
+	•	Rule: Object-oriented design must comply with SOLID principles:
+	•	Single Responsibility Principle: Each class should have one reason to change.
+	•	Open/Closed Principle: Classes should be extendable without modification.
+	•	Liskov Substitution Principle: Derived classes must be replaceable with their base classes without altering the correctness of the program.
+	•	Interface Segregation Principle: No client should be forced to depend on methods it does not use.
+	•	Dependency Inversion Principle: Depend on abstractions, not concretions.
+	•	Implementation:
+	•	Ensure that the design and structure of classes and modules reflect these principles, resulting in flexible and scalable code.
+	10.	Regular Refactoring and Code Review
+	•	Rule: The codebase must be continuously examined for improvement opportunities, with refactoring applied to eliminate complexity and anti-patterns.
+	•	Implementation:
+	•	Implement regular code reviews to verify adherence to Clean Code practices.
+	•	Encourage refactoring sessions where technical debt is addressed and code clarity is enhanced.
+	11.	Simplicity and Minimalism in Design
+	•	Rule: Strive for the simplest solution that fulfills the requirements—avoid over-engineering by keeping designs as minimal as possible.
+	•	Implementation:
+	•	Avoid introducing unnecessary complexity.
+	•	Use straightforward implementations while ensuring scalability and robustness where it matters.
+
+⸻
+
+Enforcement Guidelines for the LLMS:
+	•	Validation Step: For every code snippet generated, the LLMS must validate that each of the above rules is satisfied. This includes checking naming conventions, function sizes, formatting consistency, error handling, DRY compliance, separation of concerns, and appropriate commenting.
+	•	Automatic Remediation: If the generated code does not meet any of the rules, an alert mechanism should trigger an automated review or a request for revision.
+	•	Feedback Loop: The LLMS should incorporate feedback from code reviews and refactoring sessions to continuously improve its output in line with these Clean Code standards.
+
