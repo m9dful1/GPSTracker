@@ -59,7 +59,8 @@ data class PointOfInterestEntity(
             photoUrl = photoUrl,
             placeId = placeId,
             isVisited = isVisited,
-            userNotes = userNotes
+            userNotes = userNotes,
+            visitedDate = visitedDate
         )
     }
     
@@ -80,7 +81,11 @@ data class PointOfInterestEntity(
                 placeId = domainModel.placeId,
                 isVisited = domainModel.isVisited,
                 userNotes = domainModel.userNotes,
-                visitedDate = visitedDate ?: if (domainModel.isVisited) System.currentTimeMillis() else null
+                // Keep the original visit timestamp on re-saves; only stamp a
+                // new one the first time a place becomes visited
+                visitedDate = visitedDate
+                    ?: domainModel.visitedDate
+                    ?: if (domainModel.isVisited) System.currentTimeMillis() else null
             )
         }
     }

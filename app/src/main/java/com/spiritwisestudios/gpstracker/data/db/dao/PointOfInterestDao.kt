@@ -10,7 +10,7 @@ interface PointOfInterestDao {
     @Query("SELECT * FROM points_of_interest")
     fun getAllPointsOfInterest(): Flow<List<PointOfInterestEntity>>
     
-    @Query("SELECT * FROM points_of_interest WHERE is_visited = 1")
+    @Query("SELECT * FROM points_of_interest WHERE is_visited = 1 ORDER BY visited_date DESC")
     fun getVisitedPlaces(): Flow<List<PointOfInterestEntity>>
 
     @Query("SELECT id FROM points_of_interest WHERE is_visited = 1")

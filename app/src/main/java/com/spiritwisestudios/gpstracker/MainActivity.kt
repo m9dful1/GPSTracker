@@ -41,6 +41,7 @@ import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
 import com.spiritwisestudios.gpstracker.service.TourModeService
 import com.spiritwisestudios.gpstracker.ui.fragment.PlaceDetailsBottomSheet
+import com.spiritwisestudios.gpstracker.ui.fragment.TourJournalBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.TourSettingsFragment
 import com.spiritwisestudios.gpstracker.ui.fragment.TurnInstructionFragment
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
@@ -342,7 +343,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             }
             Toast.makeText(this, "Traffic: ${mMap.isTrafficEnabled}", Toast.LENGTH_SHORT).show()
         }
-        
+
+        // Journal FAB: every place the tour guide has narrated so far
+        findViewById<FloatingActionButton>(R.id.fab_journal).setOnClickListener {
+            TourJournalBottomSheet.newInstance()
+                .show(supportFragmentManager, TourJournalBottomSheet.TAG)
+        }
+
         // Set up editor action listener for the destination EditText
         etDestination.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {

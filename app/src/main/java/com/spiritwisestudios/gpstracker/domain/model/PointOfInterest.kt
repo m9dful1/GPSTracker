@@ -17,7 +17,9 @@ data class PointOfInterest(
     val photoUrl: String? = null,
     val placeId: String? = null,
     val isVisited: Boolean = false,
-    val userNotes: String? = null
+    val userNotes: String? = null,
+    /** Epoch millis of when the place was narrated/visited, if it was. */
+    val visitedDate: Long? = null
 ) {
     /**
      * Categories for points of interest

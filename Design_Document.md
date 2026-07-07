@@ -890,6 +890,7 @@ By implementing these fixes, the application should have more reliable navigatio
 - **Category-styled markers**: `MarkerStyling` (pure, unit-tested) maps each category to a distinct marker hue and fades already-narrated places to 45% alpha.
 - **Corridor and polyline follow reroutes**: `NavigationStatus.routeVersion` increments on every route (re)calculation; MainActivity re-sends the tour corridor and redraws the route polyline whenever it changes (previously both were done once per session, so off-route recalculations left a stale polyline and a stale corridor).
 - **Tappable fact card**: `Narration` carries the placeId; tapping the card opens the place details sheet for the spot being narrated.
+- **Tour Journal**: a journal FAB opens `TourJournalBottomSheet`, listing every narrated place newest-first (name, category, visit time) with tap-through to the details sheet. Backed by the existing visited-places store; `PointOfInterest` now carries `visitedDate`, and re-saves preserve the original visit timestamp.
 
 ## Remaining TODOs
 

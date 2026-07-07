@@ -49,6 +49,16 @@
         android:contentDescription="Map layers"
         app:srcCompat="@android:drawable/ic_menu_mapmode" />
 
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fab_journal"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="160dp"
+        android:contentDescription="Tour journal"
+        app:srcCompat="@android:drawable/ic_menu_recent_history" />
+
     <!-- Turn instruction fragment container -->
     <FrameLayout
         android:id="@+id/turn_instruction_container"
