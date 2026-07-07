@@ -1,8 +1,21 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.jetbrainsKotlinAndroid)
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
+}
+
+// The Maps/Places/Directions API key lives in local.properties (gitignored) as
+// MAPS_API_KEY=... — see app/docs/api_key_setup.md. Restrict the key in Google
+// Cloud Console; never commit it.
+val mapsApiKey: String = Properties().let { props ->
+    val localProperties = rootProject.file("local.properties")
+    if (localProperties.exists()) {
+        localProperties.inputStream().use { props.load(it) }
+    }
+    props.getProperty("MAPS_API_KEY") ?: ""
 }
 
 android {
@@ -17,6 +30,9 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
+        buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
     }
 
     buildTypes {
@@ -29,11 +45,11 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "17"
         freeCompilerArgs += listOf(
             "-Xjvm-default=all",
             "-Xsam-conversions=class"
@@ -102,4 +118,7 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     testImplementation("org.mockito:mockito-core:5.10.0")
     testImplementation("androidx.arch.core:core-testing:2.2.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    // Real org.json for local unit tests (the android.jar stub throws)
+    testImplementation("org.json:json:20231013")
 }

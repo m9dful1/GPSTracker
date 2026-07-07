@@ -6,20 +6,16 @@ import android.content.Intent
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofenceStatusCodes
 import com.google.android.gms.location.GeofencingEvent
+import androidx.core.content.ContextCompat
 import com.spiritwisestudios.gpstracker.service.TourModeService
 import com.spiritwisestudios.gpstracker.util.AppConstants
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import timber.log.Timber
 
 /**
  * BroadcastReceiver to handle geofence transition events.
  */
 class GeofenceBroadcastReceiver : BroadcastReceiver() {
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    
+
     override fun onReceive(context: Context, intent: Intent) {
         Timber.d("Geofence event received")
         
@@ -64,22 +60,16 @@ class GeofenceBroadcastReceiver : BroadcastReceiver() {
         
         // Log the transition details
         Timber.d("Geofence transition: $transitionString for geofences: $triggeringGeofenceIds")
-        
-        // Handle the transition in a coroutine to avoid blocking the broadcast receiver
-        scope.launch {
-            when (geofenceTransition) {
-                Geofence.GEOFENCE_TRANSITION_ENTER -> {
-                    // Notify the tour guide service about entering a POI zone
-                    notifyTourGuideService(context, "enter", triggeringGeofenceIds)
-                }
-                Geofence.GEOFENCE_TRANSITION_DWELL -> {
-                    // Notify the tour guide service about dwelling in a POI zone
-                    notifyTourGuideService(context, "dwell", triggeringGeofenceIds)
-                }
-                Geofence.GEOFENCE_TRANSITION_EXIT -> {
-                    // Notify the tour guide service about exiting a POI zone
-                    notifyTourGuideService(context, "exit", triggeringGeofenceIds)
-                }
+
+        when (geofenceTransition) {
+            Geofence.GEOFENCE_TRANSITION_ENTER -> {
+                notifyTourGuideService(context, "enter", triggeringGeofenceIds)
+            }
+            Geofence.GEOFENCE_TRANSITION_DWELL -> {
+                notifyTourGuideService(context, "dwell", triggeringGeofenceIds)
+            }
+            Geofence.GEOFENCE_TRANSITION_EXIT -> {
+                notifyTourGuideService(context, "exit", triggeringGeofenceIds)
             }
         }
     }
@@ -96,9 +86,11 @@ class GeofenceBroadcastReceiver : BroadcastReceiver() {
         }
         
         Timber.d("Starting TourModeService with action: $action for geofences: $geofenceIds")
-        
-        // Use regular startService instead of startForegroundService to avoid requiring
-        // immediate startForeground() call in the service
-        context.startService(serviceIntent)
+
+        // The app may be in the background when a geofence fires, where plain
+        // startService() throws IllegalStateException. Geofence transitions
+        // grant a foreground-service-start exemption, and TourModeService
+        // calls startForeground() immediately in onStartCommand().
+        ContextCompat.startForegroundService(context, serviceIntent)
     }
 } 

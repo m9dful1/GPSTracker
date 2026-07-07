@@ -29,6 +29,26 @@
         android:contentDescription="@string/navigation_fab_description"
         app:srcCompat="@android:drawable/ic_menu_directions" />
 
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fab_recenter"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="16dp"
+        android:contentDescription="@string/enter_destination"
+        app:srcCompat="@android:drawable/ic_menu_mylocation" />
+
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fab_layers"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="88dp"
+        android:contentDescription="Map layers"
+        app:srcCompat="@android:drawable/ic_menu_mapmode" />
+
     <!-- Turn instruction fragment container -->
     <FrameLayout
         android:id="@+id/turn_instruction_container"
@@ -95,6 +115,26 @@
             </LinearLayout>
         </LinearLayout>
     </androidx.cardview.widget.CardView>
+
+    <!-- GPS status banner -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/gps_status_card"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_margin="16dp"
+        android:visibility="gone"
+        app:cardCornerRadius="8dp"
+        app:cardElevation="2dp">
+
+        <TextView
+            android:id="@+id/tv_gps_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="12dp"
+            android:text="Waiting for GPS…"
+            android:textAppearance="?attr/textAppearanceBody2" />
+    </androidx.cardview.widget.CardView>
     
     <!-- Include destination input card -->
     <include
@@ -136,6 +176,16 @@
                 android:layout_marginTop="4dp"
                 android:text="@string/eta_calculating"
                 android:textAppearance="?attr/textAppearanceBody2" />
+
+            <ProgressBar
+                android:id="@+id/progress_eta"
+                style="@android:style/Widget.ProgressBar.Horizontal"
+                android:layout_width="match_parent"
+                android:layout_height="6dp"
+                android:layout_marginTop="8dp"
+                android:max="1000"
+                android:progress="0"
+                android:indeterminate="false" />
                 
             <Button
                 android:id="@+id/btn_stop_navigation"

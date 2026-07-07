@@ -12,4 +12,7 @@
 /captures
 .externalNativeBuild
 .cxx
+
+# Contains MAPS_API_KEY (Google Maps/Places/Directions) — never commit
 local.properties
+.agentbus

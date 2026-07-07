@@ -10,13 +10,24 @@ import kotlinx.coroutines.flow.Flow
 interface PlacesRepository {
     
     /**
-     * Get nearby points of interest based on current location.
-     * 
+     * Get points of interest around a location.
+     *
+     * @param center Location to search around
      * @param radius Search radius in meters
      * @return Flow of points of interest
      */
-    fun getNearbyPlaces(radius: Int = 500): Flow<List<PointOfInterest>>
-    
+    fun getNearbyPlaces(center: LatLng, radius: Int = 500): Flow<List<PointOfInterest>>
+
+    /**
+     * Get points of interest along a route corridor, in route order.
+     * Searches around sampled points along the polyline and de-duplicates.
+     *
+     * @param route The route polyline
+     * @param searchRadius Radius in meters around each sampled route point
+     * @return Points of interest along the route, ordered by route progress
+     */
+    suspend fun getPlacesAlongRoute(route: List<LatLng>, searchRadius: Int = 500): List<PointOfInterest>
+
     /**
      * Get detailed information about a specific place
      * 

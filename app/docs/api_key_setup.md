@@ -1,27 +1,49 @@
 # Google Maps API Key Setup Guide
 
-The app is currently using the API key:
-```
-AIzaSyASDymHsKY9mAZ1-INzVhVskC7x4EVCPg0
+The app reads its Google Maps/Places/Directions API key from `local.properties`
+(which is gitignored and never committed):
+
+```properties
+MAPS_API_KEY=your_api_key_here
 ```
 
-## Fixing the API Key Authorization
+At build time, Gradle injects this value into:
+- the manifest `com.google.android.geo.API_KEY` meta-data entry (used by the Maps SDK), and
+- `BuildConfig.MAPS_API_KEY` (used by the Places SDK initialization and the
+  Directions / Places web-service calls).
 
-To fix the map rendering issue, you need to properly register your app's signing certificate in the Google Cloud Console:
+If the key is missing, the app builds but the map will not load, and a warning
+is logged at startup.
+
+> **Note:** An earlier revision of this repo committed a plaintext API key to
+> the manifest, so that key exists in git history. Treat it as public: restrict
+> it in Google Cloud Console (or rotate it) before shipping anything.
+
+## Required APIs
+
+Enable these in Google Cloud Console for the project that owns the key:
+
+- Maps SDK for Android
+- Places API
+- Directions API
+
+Wikipedia content requires no key.
+
+## Restricting the key
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Select or create the project that owns the API key
-3. Navigate to APIs & Services → Credentials
-4. Find the API key "AIzaSyASDymHsKY9mAZ1-INzVhVskC7x4EVCPg0" and edit it
-5. Under "Application restrictions", select "Android apps"
-6. Add your app's SHA-1 certificate fingerprint and package name:
-   - SHA-1 certificate fingerprint: `2D:B7:5A:31:71:CE:9F:40:6C:F3:6B:D8:0D:5B:8C:13:8B:62:B1:3E`
-   - Package name: `com.spiritwisestudios.gpstracker`
-7. Save the changes
+2. Select the project that owns the API key
+3. Navigate to APIs & Services → Credentials and edit the key
+4. Under "API restrictions", limit the key to the three APIs above
+5. Under "Application restrictions": note that this app calls the Directions
+   and Places web services over HTTP, which do not send Android app
+   credentials. An Android-app-restricted key will work for the map itself but
+   those HTTP calls will be denied. For development, leave application
+   restrictions off; for production, split into two keys (an Android-restricted
+   key for the Maps/Places SDKs and a separate key for web-service calls,
+   ideally proxied through a backend).
 
 ## Finding Your App's SHA-1 Fingerprint
-
-If you need a different SHA-1 fingerprint for your specific development environment:
 
 ### For debug builds (Android Studio development):
 ```
@@ -32,19 +54,3 @@ keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -sto
 ```
 keytool -list -v -keystore <path_to_your_keystore> -alias <your_alias_name>
 ```
-
-## Alternative: Generate a New API Key
-
-If you cannot access the existing API key, you can generate a new one:
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Select your project
-3. Navigate to APIs & Services → Credentials
-4. Create a new API key
-5. Restrict it to Android apps with your app's SHA-1 fingerprint and package name
-6. Enable the required APIs:
-   - Maps SDK for Android
-   - Places API (if using Places features)
-7. Update the API key in:
-   - `AndroidManifest.xml`
-   - `app/src/main/res/values/api_keys.xml` 

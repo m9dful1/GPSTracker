@@ -11,11 +11,10 @@ import android.speech.tts.UtteranceProgressListener
 import com.spiritwisestudios.gpstracker.domain.model.TourContent
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.domain.service.AudioService
+import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.suspendCancellableCoroutine
 import timber.log.Timber
 import java.util.Locale
@@ -24,85 +23,148 @@ import javax.inject.Inject
 import kotlin.coroutines.resume
 
 /**
- * Implementation of AudioService using Android's TextToSpeech.
+ * TextToSpeech-based AudioService.
+ *
+ * A single persistent UtteranceProgressListener dispatches TTS callbacks to
+ * the flow of whichever utterance is current (per-call listeners would clobber
+ * each other). Navigation prompts via [speakPriority] pause tour narration and
+ * resume it from the interrupted sentence when the prompt completes.
  */
 class AudioServiceImpl @Inject constructor(
     private val context: Context
 ) : AudioService {
-    
+
+    private data class Utterance(
+        val id: String,
+        val text: String,
+        val channel: SendChannel<AudioService.SpeakingStatus>?,
+        val isPrompt: Boolean
+    )
+
+    private data class PendingNarration(
+        val text: String,
+        val position: Int,
+        val channel: SendChannel<AudioService.SpeakingStatus>?
+    )
+
+    companion object {
+        /**
+         * Text to speak when resuming narration that was interrupted at
+         * [position]: restarts from the beginning of the interrupted sentence.
+         */
+        internal fun resumeTextFrom(text: String, position: Int): String {
+            val clamped = position.coerceIn(0, text.length)
+            if (clamped == 0) return text
+
+            val boundary = Regex("[.!?]\\s").findAll(text.substring(0, clamped))
+                .lastOrNull()?.range?.last?.plus(1) ?: 0
+
+            return text.substring(boundary).trim().ifEmpty { text }
+        }
+    }
+
     private var textToSpeech: TextToSpeech? = null
     private var isInitialized = false
-    private var currentUtteranceId: String? = null
+
+    private val lock = Any()
+    private var current: Utterance? = null
+    private var pendingResume: PendingNarration? = null
+    private var lastSpeakingPosition = 0
     private var isPaused = false
-    private var lastSpokenText: String? = null
-    private var lastSpeakingPosition: Int = 0
-    
+
     // Audio Manager for handling audio focus
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
     private var hasAudioFocus = false
-    
-    // Current speaking status flow
-    private val _currentSpeakingStatus = MutableStateFlow<AudioService.SpeakingStatus?>(null)
-    
+
     // Audio focus change listener
     private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         when (focusChange) {
             AudioManager.AUDIOFOCUS_LOSS -> {
-                // We've lost focus permanently - stop speaking
                 Timber.d("Audio focus lost permanently")
                 hasAudioFocus = false
-                stopTTS()
+                stop()
             }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                // We've lost focus temporarily - pause speaking
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 Timber.d("Audio focus lost temporarily")
                 hasAudioFocus = false
-                pauseTTS()
+                pause()
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
-                // We've gained focus - resume if we were speaking previously
                 Timber.d("Audio focus gained")
                 hasAudioFocus = true
                 if (isPaused) {
-                    resumeTTS()
+                    resume()
                 }
-            }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                // We can duck (play at lower volume) - implement if needed
-                Timber.d("Audio focus loss - can duck")
-                // For TTS, ducking doesn't make much sense, so we pause
-                hasAudioFocus = false
-                pauseTTS()
             }
         }
     }
-    
+
+    // Single persistent listener; dispatches to the current utterance's flow
+    private val progressListener = object : UtteranceProgressListener() {
+        override fun onStart(utteranceId: String) {
+            val channel = synchronized(lock) {
+                current?.takeIf { it.id == utteranceId }?.channel
+            }
+            channel?.trySend(AudioService.SpeakingStatus.STARTED)
+        }
+
+        override fun onDone(utteranceId: String) {
+            handleUtteranceFinished(utteranceId, error = false)
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onError(utteranceId: String) {
+            handleUtteranceFinished(utteranceId, error = true)
+        }
+
+        override fun onError(utteranceId: String, errorCode: Int) {
+            handleUtteranceFinished(utteranceId, error = true)
+        }
+
+        override fun onRangeStart(utteranceId: String, start: Int, end: Int, frame: Int) {
+            val channel = synchronized(lock) {
+                if (current?.id == utteranceId) {
+                    lastSpeakingPosition = start
+                    current?.channel
+                } else null
+            }
+            channel?.trySend(AudioService.SpeakingStatus.IN_PROGRESS)
+        }
+
+        override fun onStop(utteranceId: String, interrupted: Boolean) {
+            // State transitions are handled where the interruption originates
+            // (speak/speakPriority/pause/stop), nothing to do here.
+        }
+    }
+
     override suspend fun initialize(userPreferences: UserPreferences): Boolean {
         // If already initialized, just update settings
         if (isInitialized) {
             updateVoiceSettings(userPreferences)
             return true
         }
-        
+
         return suspendCancellableCoroutine { continuation ->
             textToSpeech = TextToSpeech(context) { status ->
                 if (status == TextToSpeech.SUCCESS) {
                     // Set language
                     val locale = Locale.forLanguageTag(userPreferences.voiceLanguage)
                     val result = textToSpeech?.setLanguage(locale)
-                    
-                    if (result == TextToSpeech.LANG_MISSING_DATA || 
+
+                    if (result == TextToSpeech.LANG_MISSING_DATA ||
                         result == TextToSpeech.LANG_NOT_SUPPORTED) {
                         Timber.e("Language not supported: ${userPreferences.voiceLanguage}")
                         continuation.resume(false)
                         return@TextToSpeech
                     }
-                    
+
                     // Set speech rate and pitch
                     textToSpeech?.setSpeechRate(userPreferences.voiceSpeed)
                     textToSpeech?.setPitch(userPreferences.voicePitch)
-                    
+                    textToSpeech?.setOnUtteranceProgressListener(progressListener)
+
                     isInitialized = true
                     continuation.resume(true)
                 } else {
@@ -110,186 +172,226 @@ class AudioServiceImpl @Inject constructor(
                     continuation.resume(false)
                 }
             }
-            
+
             continuation.invokeOnCancellation {
                 shutdown()
             }
         }
     }
-    
+
     override fun speak(content: TourContent): Flow<AudioService.SpeakingStatus> {
         return speak(content.content)
     }
-    
+
     override fun speak(text: String): Flow<AudioService.SpeakingStatus> = callbackFlow {
-        if (!isInitialized || textToSpeech == null) {
+        if (!isInitialized || textToSpeech == null || !requestAudioFocus()) {
             trySend(AudioService.SpeakingStatus.ERROR)
             close()
             return@callbackFlow
         }
-        
-        // Save text for potential resumption later
-        lastSpokenText = text
-        lastSpeakingPosition = 0
-        isPaused = false
-        
-        // Request audio focus before speaking
-        if (!requestAudioFocus()) {
-            trySend(AudioService.SpeakingStatus.ERROR)
-            close()
-            return@callbackFlow
+
+        synchronized(lock) {
+            // New narration replaces anything in flight, including a pending resume
+            current?.channel?.close()
+            pendingResume?.channel?.close()
+            pendingResume = null
+            isPaused = false
         }
-        
-        // Generate a unique ID for this utterance
-        val utteranceId = UUID.randomUUID().toString()
-        currentUtteranceId = utteranceId
-        
-        // Set up progress listener
-        textToSpeech?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String) {
-                _currentSpeakingStatus.value = AudioService.SpeakingStatus.STARTED
-                trySend(AudioService.SpeakingStatus.STARTED)
-            }
-            
-            override fun onDone(utteranceId: String) {
-                if (utteranceId == currentUtteranceId) {
-                    _currentSpeakingStatus.value = AudioService.SpeakingStatus.COMPLETED
-                    currentUtteranceId = null
-                    lastSpokenText = null
-                    lastSpeakingPosition = 0
-                    isPaused = false
-                    releaseAudioFocus()
-                    trySend(AudioService.SpeakingStatus.COMPLETED)
-                    close()
-                }
-            }
-            
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String) {
-                if (utteranceId == currentUtteranceId) {
-                    _currentSpeakingStatus.value = AudioService.SpeakingStatus.ERROR
-                    currentUtteranceId = null
-                    releaseAudioFocus()
-                    trySend(AudioService.SpeakingStatus.ERROR)
-                    close()
-                }
-            }
-            
-            // Added in API level 23
-            override fun onError(utteranceId: String, errorCode: Int) {
-                if (utteranceId == currentUtteranceId) {
-                    _currentSpeakingStatus.value = AudioService.SpeakingStatus.ERROR
-                    currentUtteranceId = null
-                    releaseAudioFocus()
-                    trySend(AudioService.SpeakingStatus.ERROR)
-                    close()
-                }
-            }
-            
-            override fun onRangeStart(utteranceId: String, start: Int, end: Int, frame: Int) {
-                if (utteranceId == currentUtteranceId) {
-                    _currentSpeakingStatus.value = AudioService.SpeakingStatus.IN_PROGRESS
-                    lastSpeakingPosition = start
-                    trySend(AudioService.SpeakingStatus.IN_PROGRESS)
-                }
-            }
-        })
-        
-        // Start speaking
-        val bundle = Bundle()
-        bundle.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
-        
-        val result = textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, bundle, utteranceId)
-        if (result == TextToSpeech.ERROR) {
-            _currentSpeakingStatus.value = AudioService.SpeakingStatus.ERROR
-            releaseAudioFocus()
-            trySend(AudioService.SpeakingStatus.ERROR)
-            close()
-        }
-        
-        awaitClose {
-            // Clean up when flow is closed
-            if (currentUtteranceId == utteranceId) {
-                textToSpeech?.stop()
-                releaseAudioFocus()
-                currentUtteranceId = null
-            }
-        }
+        startUtterance(text, channel = this, isPrompt = false)
+
+        awaitClose { onChannelClosed(this) }
     }
-    
+
+    override fun speakPriority(text: String): Flow<AudioService.SpeakingStatus> = callbackFlow {
+        if (!isInitialized || textToSpeech == null || !requestAudioFocus()) {
+            trySend(AudioService.SpeakingStatus.ERROR)
+            close()
+            return@callbackFlow
+        }
+
+        synchronized(lock) {
+            val interrupted = current
+            if (interrupted != null && !interrupted.isPrompt) {
+                // Park the narration; it resumes when the prompt completes
+                pendingResume = PendingNarration(interrupted.text, lastSpeakingPosition, interrupted.channel)
+                interrupted.channel?.trySend(AudioService.SpeakingStatus.PAUSED)
+                current = null
+            } else if (interrupted != null) {
+                // A newer prompt replaces an older one; keep any pending narration
+                interrupted.channel?.close()
+                current = null
+            }
+        }
+        startUtterance(text, channel = this, isPrompt = true)
+
+        awaitClose { onChannelClosed(this) }
+    }
+
     override fun pause(): Boolean {
-        if (!isPaused && textToSpeech != null && currentUtteranceId != null) {
-            pauseTTS()
-            return true
+        synchronized(lock) {
+            val active = current ?: return false
+            if (isPaused) return false
+
+            pendingResume = PendingNarration(active.text, lastSpeakingPosition, active.channel)
+            current = null
+            isPaused = true
+            active.channel?.trySend(AudioService.SpeakingStatus.PAUSED)
         }
-        return false
+        textToSpeech?.stop()
+        return true
     }
-    
+
     override fun resume(): Boolean {
-        if (isPaused && textToSpeech != null && lastSpokenText != null) {
-            if (!hasAudioFocus && !requestAudioFocus()) {
-                return false
+        val toResume = synchronized(lock) {
+            if (!isPaused) return false
+            pendingResume.also { pendingResume = null; isPaused = false }
+        } ?: return false
+
+        if (!hasAudioFocus && !requestAudioFocus()) {
+            synchronized(lock) {
+                pendingResume = toResume
+                isPaused = true
             }
-            resumeTTS()
-            return true
+            return false
         }
-        return false
+
+        startUtterance(resumeTextFrom(toResume.text, toResume.position), toResume.channel, isPrompt = false)
+        return true
     }
-    
+
     override fun stop() {
-        stopTTS()
+        synchronized(lock) {
+            current?.channel?.close()
+            pendingResume?.channel?.close()
+            current = null
+            pendingResume = null
+            isPaused = false
+            lastSpeakingPosition = 0
+        }
+        textToSpeech?.stop()
+        releaseAudioFocus()
     }
-    
+
     override fun isSpeaking(): Boolean {
         return isInitialized && textToSpeech?.isSpeaking == true
     }
-    
+
     override fun updateVoiceSettings(preferences: UserPreferences) {
         if (!isInitialized || textToSpeech == null) return
-        
+
         // Update language if needed
         val locale = Locale.forLanguageTag(preferences.voiceLanguage)
         textToSpeech?.setLanguage(locale)
-        
+
         // Update speech rate and pitch
         textToSpeech?.setSpeechRate(preferences.voiceSpeed)
         textToSpeech?.setPitch(preferences.voicePitch)
     }
-    
+
     override fun shutdown() {
-        textToSpeech?.stop()
+        stop()
         textToSpeech?.shutdown()
         textToSpeech = null
-        releaseAudioFocus()
         isInitialized = false
-        currentUtteranceId = null
-        lastSpokenText = null
-        lastSpeakingPosition = 0
-        isPaused = false
     }
-    
+
+    /**
+     * Begin speaking [text], flushing any current TTS output, and route
+     * subsequent callbacks to [channel].
+     */
+    private fun startUtterance(
+        text: String,
+        channel: SendChannel<AudioService.SpeakingStatus>?,
+        isPrompt: Boolean
+    ) {
+        val utteranceId = UUID.randomUUID().toString()
+        synchronized(lock) {
+            current = Utterance(utteranceId, text, channel, isPrompt)
+            lastSpeakingPosition = 0
+        }
+
+        val bundle = Bundle()
+        bundle.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
+
+        val result = textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, bundle, utteranceId)
+        if (result == TextToSpeech.ERROR) {
+            synchronized(lock) {
+                if (current?.id == utteranceId) current = null
+            }
+            channel?.trySend(AudioService.SpeakingStatus.ERROR)
+            channel?.close()
+            releaseAudioFocus()
+        }
+    }
+
+    private fun handleUtteranceFinished(utteranceId: String, error: Boolean) {
+        val finished: Utterance
+        var toResume: PendingNarration? = null
+
+        synchronized(lock) {
+            val active = current ?: return
+            if (active.id != utteranceId) return
+            finished = active
+            current = null
+            if (active.isPrompt && pendingResume != null && !isPaused) {
+                toResume = pendingResume
+                pendingResume = null
+            }
+        }
+
+        val status = if (error) AudioService.SpeakingStatus.ERROR else AudioService.SpeakingStatus.COMPLETED
+        finished.channel?.trySend(status)
+        finished.channel?.close()
+
+        val resume = toResume
+        if (resume != null && resume.channel?.isClosedForSend != true) {
+            // Resume the narration the prompt interrupted
+            startUtterance(resumeTextFrom(resume.text, resume.position), resume.channel, isPrompt = false)
+        } else {
+            releaseAudioFocus()
+        }
+    }
+
+    /**
+     * Collector went away: stop speech only if this channel owns the current
+     * utterance, and drop any pending resume bound to it.
+     */
+    private fun onChannelClosed(channel: SendChannel<AudioService.SpeakingStatus>) {
+        var shouldStopTts = false
+        synchronized(lock) {
+            if (current?.channel === channel) {
+                current = null
+                shouldStopTts = true
+            }
+            if (pendingResume?.channel === channel) {
+                pendingResume = null
+            }
+        }
+        if (shouldStopTts) {
+            textToSpeech?.stop()
+            releaseAudioFocus()
+        }
+    }
+
     /**
      * Request audio focus for TTS playback.
      */
     private fun requestAudioFocus(): Boolean {
         if (hasAudioFocus) return true
-        
-        // Release any existing audio focus first
-        releaseAudioFocus()
-        
+
         val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // For Android 8.0+
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
-                
+
             val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                 .setAudioAttributes(audioAttributes)
                 .setOnAudioFocusChangeListener(audioFocusChangeListener)
                 .setWillPauseWhenDucked(true)
                 .build()
-                
+
             audioFocusRequest = focusRequest
             audioManager.requestAudioFocus(focusRequest)
         } else {
@@ -301,11 +403,11 @@ class AudioServiceImpl @Inject constructor(
                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
             )
         }
-        
+
         hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
         return hasAudioFocus
     }
-    
+
     /**
      * Release audio focus when done speaking.
      */
@@ -319,57 +421,4 @@ class AudioServiceImpl @Inject constructor(
         }
         hasAudioFocus = false
     }
-    
-    /**
-     * Pause TTS playback.
-     */
-    private fun pauseTTS() {
-        if (textToSpeech?.isSpeaking == true) {
-            textToSpeech?.stop()
-            isPaused = true
-            _currentSpeakingStatus.value = AudioService.SpeakingStatus.PAUSED
-        }
-    }
-    
-    /**
-     * Resume TTS playback.
-     */
-    private fun resumeTTS() {
-        val textToResume = lastSpokenText ?: return
-        
-        // If we have a position to resume from, try to resume from that point
-        // This is a simplistic approach - for a more sophisticated implementation, 
-        // we would need to parse sentences and find a good starting point
-        val positionToResume = if (lastSpeakingPosition > 0) {
-            // Find the start of the current sentence or a reasonable point to resume
-            val textToStart = textToResume.substring(lastSpeakingPosition)
-            // If we're in the middle of a sentence, start from the beginning of that sentence
-            textToResume.substring(0, lastSpeakingPosition) + textToStart
-        } else {
-            textToResume
-        }
-        
-        val utteranceId = UUID.randomUUID().toString()
-        currentUtteranceId = utteranceId
-        
-        val bundle = Bundle()
-        bundle.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
-        
-        textToSpeech?.speak(positionToResume, TextToSpeech.QUEUE_FLUSH, bundle, utteranceId)
-        isPaused = false
-        _currentSpeakingStatus.value = AudioService.SpeakingStatus.IN_PROGRESS
-    }
-    
-    /**
-     * Stop TTS playback completely.
-     */
-    private fun stopTTS() {
-        textToSpeech?.stop()
-        currentUtteranceId = null
-        lastSpokenText = null
-        lastSpeakingPosition = 0
-        isPaused = false
-        releaseAudioFocus()
-        _currentSpeakingStatus.value = null
-    }
-} 
+}

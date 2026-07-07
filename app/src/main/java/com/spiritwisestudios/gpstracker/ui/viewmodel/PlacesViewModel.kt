@@ -5,6 +5,7 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.asLiveData
+import com.google.android.gms.maps.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.repository.PlacesRepository
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.TourContent
@@ -13,6 +14,7 @@ import com.spiritwisestudios.gpstracker.domain.service.AudioService
 import com.spiritwisestudios.gpstracker.data.repository.TourContentRepository
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.launchIn
@@ -74,13 +76,13 @@ class PlacesViewModel @Inject constructor(
     }
 
     /**
-     * Fetch nearby places from the repository
+     * Fetch places around a location from the repository
      */
-    fun fetchNearbyPlaces(radius: Int = 500) {
+    fun fetchNearbyPlaces(center: LatLng, radius: Int = 500) {
         _isLoading.value = true
         _error.value = null
 
-        placesRepository.getNearbyPlaces(radius)
+        placesRepository.getNearbyPlaces(center, radius)
             .onEach { places ->
                 _nearbyPlaces.value = places
                 _isLoading.value = false
@@ -175,9 +177,9 @@ class PlacesViewModel @Inject constructor(
      */
     private suspend fun loadContentForSelectedPlace() {
         val place = _selectedPlace.value ?: return
-        val preferences = userPreferencesRepository.userPreferencesFlow.asLiveData().value ?: UserPreferences()
-        
         try {
+            // Get the latest preferences by collecting once from the flow
+            val preferences = userPreferencesRepository.userPreferencesFlow.first()
             val content = tourContentRepository.getContentForPlace(place, preferences)
             _selectedPlaceContent.value = content
         } catch (e: Exception) {
@@ -185,27 +187,30 @@ class PlacesViewModel @Inject constructor(
             _error.value = "Failed to load content: ${e.message}"
         }
     }
-    
+
     /**
      * Generate content for the currently selected place
      */
     fun generateContentForSelectedPlace() {
         val place = _selectedPlace.value ?: return
-        val preferences = userPreferencesRepository.userPreferencesFlow.asLiveData().value ?: UserPreferences()
-        
-        tourContentRepository.generateContent(place, preferences)
-            .onEach { result ->
-                _contentGenerationStatus.value = result
-                if (result is TourContentRepository.ContentGenerationResult.Success) {
-                    _selectedPlaceContent.value = result.content
+
+        viewModelScope.launch {
+            val preferences = userPreferencesRepository.userPreferencesFlow.first()
+
+            tourContentRepository.generateContent(place, preferences)
+                .onEach { result ->
+                    _contentGenerationStatus.value = result
+                    if (result is TourContentRepository.ContentGenerationResult.Success) {
+                        _selectedPlaceContent.value = result.content
+                    }
                 }
-            }
-            .catch { e ->
-                Timber.e(e, "Error generating content")
-                _error.value = "Failed to generate content: ${e.message}"
-                _contentGenerationStatus.value = TourContentRepository.ContentGenerationResult.Error(e.message ?: "Unknown error")
-            }
-            .launchIn(viewModelScope)
+                .catch { e ->
+                    Timber.e(e, "Error generating content")
+                    _error.value = "Failed to generate content: ${e.message}"
+                    _contentGenerationStatus.value = TourContentRepository.ContentGenerationResult.Error(e.message ?: "Unknown error")
+                }
+                .launchIn(viewModelScope)
+        }
     }
     
     /**
@@ -226,6 +231,18 @@ class PlacesViewModel @Inject constructor(
      */
     fun speakText(text: String) {
         audioService.speak(text)
+            .onEach { status ->
+                _speakingStatus.value = status
+            }
+            .launchIn(viewModelScope)
+    }
+
+    /**
+     * Speak a navigation prompt. Ongoing tour narration is paused and resumes
+     * automatically after the prompt.
+     */
+    fun speakNavigationPrompt(text: String) {
+        audioService.speakPriority(text)
             .onEach { status ->
                 _speakingStatus.value = status
             }
@@ -281,11 +298,10 @@ class PlacesViewModel @Inject constructor(
             userPreferencesRepository.updateAudioSettings(
                 audioEnabled, voiceSpeed, voicePitch, voiceLanguage, autoPlayContent
             )
-            
-            // Also update the TTS engine
-            userPreferencesRepository.userPreferencesFlow.collectLatest { prefs ->
-                audioService.updateVoiceSettings(prefs)
-            }
+
+            // Also update the TTS engine with the freshly stored settings
+            val prefs = userPreferencesRepository.userPreferencesFlow.first()
+            audioService.updateVoiceSettings(prefs)
         }
     }
 

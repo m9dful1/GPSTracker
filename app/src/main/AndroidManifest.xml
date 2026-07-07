@@ -24,12 +24,12 @@
         android:theme="@style/Theme.GPSTracker">
 
         <!--
-          The API key is now managed securely and should be set programmatically if required.
-          See ApiKeyManager for details.
+          Injected at build time from MAPS_API_KEY in local.properties.
+          See app/docs/api_key_setup.md.
         -->
-        <!-- <meta-data
+        <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="YOUR_API_KEY" /> -->
+            android:value="${MAPS_API_KEY}" />
 
         <activity
             android:name="com.spiritwisestudios.gpstracker.MainActivity"

@@ -3,14 +3,23 @@
 ## Overview
 The GPS Tracker is an Android application that tracks and displays the user's real-time location on a Google Map. It has been expanded to function as a city tour guide, providing information about nearby points of interest, and now includes turn-by-turn navigation. The app utilizes the device's GPS, the Google Places API, and the Google Directions API to obtain location data, nearby places, and routing information, then displays them on the map with interactive elements and voice guidance.
 
+API keys live in `local.properties` (gitignored) as `MAPS_API_KEY`. Gradle injects the value into the manifest meta-data entry the Maps SDK reads, and into `BuildConfig.MAPS_API_KEY` for the Places SDK and web-service calls. See `app/docs/api_key_setup.md`.
+
+Narration content comes from Wikipedia: the app geosearches for the article matching each point of interest and narrates its intro extract, caching results in Room. A template built from place details is the fallback when no article exists.
+
 ## Project Structure
-- `MainActivity.kt`: Main activity class that handles the UI, location tracking, map interactions, and navigation UI.
+- `MainActivity.kt`: Main activity class that handles the UI, location tracking, map interactions, Places Autocomplete, and navigation UI.
 - `activity_main.xml`: Layout file for the main activity, including containers for map, status cards, and navigation instructions.
 - `bottom_sheet_place_details.xml`: Layout for the place details bottom sheet.
-- `PlaceDetailsBottomSheet.kt`: Fragment for displaying place details in a bottom sheet.
+- `PlaceDetailsBottomSheet.kt`: Fragment for displaying place details in a bottom sheet with TTS controls.
 - `layout_turn_instruction.xml`: Layout for the turn-by-turn instruction card.
 - `TurnInstructionFragment.kt`: Fragment for displaying turn-by-turn navigation instructions.
-- `TourModeService.kt`: Foreground service for continuous location monitoring and point of interest detection.
+- `service/TourModeService.kt`: Foreground service for continuous location monitoring and content playback.
+- `receiver/GeofenceBroadcastReceiver.kt`: Forwards geofence transitions to `TourModeService`.
+- `data/service/LocationAwarenessServiceImpl.kt`: Proximity monitoring, geofencing, and adaptive intervals.
+- `data/api/WikipediaApiService.kt`: Wikipedia geosearch + extracts for real POI facts.
+- `util/Polyline.kt`, `util/GeoUtils.kt`, `util/RouteSampler.kt`, `util/TourLogic.kt`: Pure, unit-tested geo/tour logic.
+- `di/AppModule.kt`, `di/AudioModule.kt`: Hilt modules wiring services/repositories/clients.
 - `build.gradle.kts`: Project-level build configuration.
 - `app/build.gradle.kts`: App-level build configuration with dependencies.
 
@@ -111,18 +120,32 @@ The GPS Tracker is an Android application that tracks and displays the user's re
   }
   ```
 
-- `PlacesService.kt`: Interface for discovering and managing places
+- `LocationAwarenessService.kt`: Interface for location awareness and proximity monitoring (implemented by `LocationAwarenessServiceImpl`)
   ```kotlin
-  interface PlacesService {
-      fun startPlaceMonitoring(userPreferences: UserPreferences): Flow<List<PointOfInterest>>
-      fun stopPlaceMonitoring()
-      suspend fun searchNearbyPlaces(location: LatLng, radius: Int, categories: Set<PointOfInterest.Category>? = null): List<PointOfInterest>
-      suspend fun setupGeofences(pointsOfInterest: List<PointOfInterest>, radius: Int = 100): Boolean
-      fun removeAllGeofences()
-      suspend fun getPlaceDetails(placeId: String): PointOfInterest?
-      suspend fun planRouteWithInterestingPlaces(start: LatLng, destination: LatLng, preferences: UserPreferences): List<PointOfInterest>
+  interface LocationAwarenessService {
+      fun startProximityMonitoring(detectionRadius: Int = 100): Flow<ProximityAlert>
+      fun stopProximityMonitoring()
+      fun isMonitoringActive(): Boolean
+      suspend fun registerPointOfInterest(pointOfInterest: PointOfInterest, customRadius: Int? = null): Boolean
+      suspend fun registerPointsOfInterest(pointsOfInterest: List<PointOfInterest>, customRadius: Int? = null): Int
+      suspend fun unregisterPointOfInterest(pointOfInterestId: String): Boolean
+      suspend fun unregisterAllPointsOfInterest(): Boolean
+      suspend fun getCurrentLocation(): LatLng?
+      fun getCurrentSpeed(): Float?
+      suspend fun getDistanceToPointOfInterest(pointOfInterest: PointOfInterest): Float?
+
+      data class ProximityAlert(
+          val pointOfInterest: PointOfInterest,
+          val distance: Float,
+          val estimatedTimeToReach: Long? = null,
+          val alertType: AlertType
+      )
+
+      enum class AlertType { APPROACHING, NEARBY, ARRIVED, DEPARTING }
   }
   ```
+
+- `PlacesService.kt`: Present for future expansion of place discovery; not currently used by `TourModeService`.
 
 - `NavigationService.kt`: Interface for navigation functionality
   ```kotlin
@@ -178,27 +201,35 @@ The GPS Tracker is an Android application that tracks and displays the user's re
 - `PlacesRepository.kt`: Interface defining operations for accessing place data
   ```kotlin
   interface PlacesRepository {
-      fun getNearbyPlaces(radius: Int = 500): Flow<List<PointOfInterest>>
+      fun getNearbyPlaces(center: LatLng, radius: Int = 500): Flow<List<PointOfInterest>>
+      suspend fun getPlacesAlongRoute(route: List<LatLng>, searchRadius: Int = 500): List<PointOfInterest>
       suspend fun getPlaceDetails(placeId: String): Result<PointOfInterest>
       suspend fun saveVisitedPlace(pointOfInterest: PointOfInterest): Result<Unit>
       fun getVisitedPlaces(): Flow<List<PointOfInterest>>
   }
   ```
+  `getPlacesAlongRoute` samples points along the route polyline (`RouteSampler`), runs a nearby search around each sample, and de-duplicates by place ID — POIs come back in route order.
 
 ### Data Layer
 
 #### API Services
 - `PlacesApiService.kt`: Service that interacts with Google Places API
   ```kotlin
-  class PlacesApiService(private val placesClient: PlacesClient) {
-      suspend fun getNearbyPlaces(radius: Int = 500): List<PointOfInterest> = suspendCancellableCoroutine { ... }
-      suspend fun getPlaceDetails(placeId: String): PointOfInterest = suspendCancellableCoroutine { ... }
-      private fun buildDescription(place: Place): String { ... }
-      private fun handleApiException(exception: Exception, logMessage: String, continuation: CancellableContinuation<T>) { ... }
-      private fun handleGenericException(exception: Exception, logMessage: String, continuation: CancellableContinuation<T>) { ... }
-      private fun getErrorMessageForStatusCode(statusCode: Int): String { ... }
+  class PlacesApiService(placesClient: PlacesClient, httpClient: OkHttpClient, apiKey: String) {
+      suspend fun getNearbyPlaces(center: LatLng, radius: Int): List<PointOfInterest>  // Nearby Search web service
+      suspend fun getPlaceDetails(placeId: String): PointOfInterest                    // Places SDK fetchPlace
   }
   ```
+  Nearby discovery uses the Places Nearby Search web service so any point can be searched (sampled route points, not just the device position). Results are filtered to tour-worthy categories, and photo references become fetchable photo URLs.
+- `WikipediaApiService.kt`: Real facts for narration
+  ```kotlin
+  class WikipediaApiService(httpClient: OkHttpClient) {
+      suspend fun findArticleFor(name: String, location: LatLng, radiusMeters: Int, allowNearestFallback: Boolean): WikiArticle?
+      suspend fun geoSearch(location: LatLng, radiusMeters: Int, limit: Int): List<GeoSearchResult>
+      suspend fun fetchExtract(pageId: Long): String?
+  }
+  ```
+  Articles are matched to POIs by word overlap between POI name and article title; landmark-like categories may fall back to the nearest article within 100m.
 
 #### Service Implementations
 - `AudioServiceImpl.kt`: Implementation of AudioService using Android's TextToSpeech
@@ -222,21 +253,18 @@ The GPS Tracker is an Android application that tracks and displays the user's re
   }
   ```
 
-- `ContentServiceImpl.kt`: Implementation of ContentService with mock content generation
+- `ContentServiceImpl.kt`: Implementation of ContentService backed by Wikipedia
   ```kotlin
-  class ContentServiceImpl @Inject constructor() : ContentService {
-      private val contentCache = mutableMapOf<String, TourContent>()
-      private val contentQueue: Queue<TourContent> = LinkedList()
-      
-      override fun generateContent(pointOfInterest: PointOfInterest, userPreferences: UserPreferences): Flow<ContentService.ContentGenerationResult> = flow { ... }
-      override suspend fun getContentForPlace(pointOfInterest: PointOfInterest, userPreferences: UserPreferences): TourContent { ... }
-      override suspend fun prefetchContent(pointsOfInterest: List<PointOfInterest>, userPreferences: UserPreferences) { ... }
-      override fun queueContentForDelivery(content: TourContent, priority: Int): Boolean { ... }
-      override suspend fun getNextContent(): TourContent? { ... }
-      override fun clearContentQueue() { ... }
-      private fun createMockContent(pointOfInterest: PointOfInterest, userPreferences: UserPreferences): TourContent { ... }
+  class ContentServiceImpl(
+      private val wikipediaApiService: WikipediaApiService,
+      private val tourContentDao: TourContentDao
+  ) : ContentService {
+      private val deliveryQueue = ContentDeliveryQueue() // thread-safe priority queue
+      // getContentForPlace: Room cache → Wikipedia article → template fallback
+      // Full text is cached untrimmed; served trimmed to the user's DetailLevel
   }
   ```
+  `TourContentRepository` is now a thin facade over `ContentService` for the UI layer (the old duplicate mock generator was removed).
 
 - `NavigationServiceImpl.kt`: Implementation of NavigationService using Google Directions API and location updates
   ```kotlin
@@ -347,18 +375,12 @@ The GPS Tracker is an Android application that tracks and displays the user's re
   class GPSTrackerApplication : Application(), OnMapsSdkInitializedCallback {
       override fun onCreate() {
           super.onCreate()
-          
-          // Initialize logging
-          if (BuildConfig.DEBUG) {
-              Timber.plant(Timber.DebugTree())
-          }
-          
-          // Initialize Maps with the latest renderer
+          if (BuildConfig.DEBUG) Timber.plant(Timber.DebugTree())
+          val apiKey = ApiKeyManager.getInstance(this).getGoogleMapsApiKey()
+          MapsInitializer.setApiKey(apiKey)
           MapsInitializer.initialize(applicationContext, Renderer.LATEST, this)
       }
-      
       override fun onMapsSdkInitialized(renderer: Renderer) {
-          // Log which renderer is being used
           when (renderer) {
               Renderer.LATEST -> Timber.d("Using the latest Maps renderer")
               Renderer.LEGACY -> Timber.d("Using the legacy Maps renderer")
@@ -368,34 +390,24 @@ The GPS Tracker is an Android application that tracks and displays the user's re
   ```
 
 #### Services
-- `TourModeService.kt`: Foreground service for continuous location monitoring
+- `TourModeService.kt`: Foreground service for continuous location monitoring and content playback
   ```kotlin
+  @AndroidEntryPoint
   class TourModeService : Service() {
-      private val binder = TourModeServiceBinder()
-      private var fusedLocationClient: FusedLocationProviderClient? = null
-      private var locationCallback: LocationCallback? = null
+      @Inject lateinit var locationAwarenessService: LocationAwarenessService
+      @Inject lateinit var placesRepository: PlacesRepository
+      @Inject lateinit var contentService: ContentService
+      @Inject lateinit var audioService: AudioService
+      private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
       private val _serviceState = MutableStateFlow<TourModeState>(TourModeState.Inactive)
-      val serviceState: StateFlow<TourModeState> = _serviceState.asStateFlow()
-      
-      inner class TourModeServiceBinder : Binder() {
-          fun getService(): TourModeService = this@TourModeService
-      }
-      
-      override fun onCreate() { ... }
-      override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int { ... }
-      override fun onBind(intent: Intent?): IBinder { ... }
-      override fun onDestroy() { ... }
-      
-      private fun startTourMode() { ... }
-      private fun stopTourMode() { ... }
-      private fun createNotificationChannel() { ... }
-      private fun createNotification(): Notification { ... }
-      private fun startLocationUpdates() { ... }
-      private fun stopLocationUpdates() { ... }
-      
+      val serviceState: StateFlow<TourModeState> = _serviceState
+      fun startTourMode(preferences: UserPreferences = UserPreferences()) { /* implemented */ }
+      fun stopTourMode() { /* implemented */ }
+      override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int { /* implemented */ }
+      private fun createNotificationChannel() { /* implemented */ }
       sealed class TourModeState {
-          data object Active : TourModeState()
           data object Inactive : TourModeState()
+          data class Active(val nearbyPlaces: List<PointOfInterest>) : TourModeState()
           data class Error(val message: String) : TourModeState()
       }
   }
@@ -433,9 +445,10 @@ The GPS Tracker is an Android application that tracks and displays the user's re
 The app now includes a tour mode feature that continues to monitor location and provide audio narration even when the app is in the background:
 
 1. **TourModeService**: A foreground service that continues location tracking when the app is in the background
-   - Uses a notification to indicate the active service to the user
+   - Uses multiple notification channels (service status, approaching, arrived, playback controls)
    - Maintains a StateFlow to communicate its state back to the UI
-   - Handles location updates and can trigger content playback for nearby POIs
+   - Uses `LocationAwarenessService` to monitor proximity and geofences; dynamically adjusts geofence radius based on speed
+   - Generates/prefetches content and manages audio playback for POIs
 
 2. **Service Binding**: MainActivity binds to the TourModeService to control and monitor its state
    - Implemented through a ServiceConnection and Binder pattern
@@ -447,7 +460,7 @@ The app now includes a tour mode feature that continues to monitor location and 
    - Stop button to exit tour mode
    - Settings button for future tour mode customization
 
-4. **Permission Handling**: Enhanced permission handling to include background location
+4. **Permission Handling**: Enhanced permission handling to include background location (Android 10+) and notifications (Android 13+)
    - `ACCESS_BACKGROUND_LOCATION` permission requested for tour mode
    - User-friendly explanations for why permissions are needed
    - Permission request flows that align with Android guidelines
@@ -502,7 +515,7 @@ The app now includes a tour mode feature that continues to monitor location and 
 
 #### **Navigation Flow (New/Updated)**
 1.  User taps Navigation FAB or selects a place from the map/details.
-2.  `MainActivity.launchPlacesAutocomplete()` is called, or `startNavigationToPlace()` if a place is already selected.
+2.  User can search destinations via Places Autocomplete ActivityResult launcher, or `startNavigationToPlace()` if a place is already selected.
 3.  User selects a destination from Autocomplete, or enters manually.
 4.  `MainActivity.startNavigation()` or `startNavigationToPlace()` is called.
 5.  `NavigationService.geocodeAddress()` may be called if input is an address string.
@@ -613,7 +626,7 @@ The app now includes a tour mode feature that continues to monitor location and 
    -   ✓ POI detection via Geofencing/Proximity Alerts
    -   ✓ Basic content queuing and playback triggering
    -   ❌ Sophisticated interruption handling (e.g., during navigation) not implemented.
-   -   ❌ Dynamic geofence radius based on speed implemented in `calculateGeofenceRadius` but needs verification.
+   -   ✓ Dynamic geofence radius based on speed implemented and applied when registering POIs.
 3. **Navigation Enhancements**
    -   ✓ Core turn-by-turn implemented.
    -   ❌ Route recalculation on deviation not implemented.
@@ -820,8 +833,7 @@ The application now implements a more complete turn-by-turn navigation system:
 ### Identified Issues and Recommended Fixes (Updated based on Implementation)
 
 1.  **Google Directions API Key Handling**: (✓ Improved)
-    -   Now uses direct resource access `R.string.google_maps_key`.
-    -   Includes basic `isValidApiKey` check.
+    -   API key is set programmatically via `ApiKeyManager` using an encrypted resource; `NavigationServiceImpl` validates basic format with `isValidApiKey`.
     -   *Recommendation*: Monitor API usage and ensure key restrictions are properly set in Google Cloud Console.
 
 2.  **Geocoding Implementation**: (✓ Improved)
@@ -856,3 +868,27 @@ The application now implements a more complete turn-by-turn navigation system:
     -   *Recommendation*: Add unit tests for `NavigationServiceImpl` (especially route parsing, instruction logic, bearing calculation) and UI tests for the navigation flow in `MainActivity`.
 
 By implementing these fixes, the application should have more reliable navigation functionality with better error handling and a more consistent user experience. 
+
+## Resolved Issues (July 2026 rework)
+
+- **API key management rebuilt**: The AES/ECB `ApiKeyManager` scheme could not work — the Maps SDK has no programmatic key API, and the device-derived encryption key made committed ciphertext undecryptable on other devices. Keys now live in `local.properties` (`MAPS_API_KEY`), injected into the manifest and `BuildConfig` at build time. All API key logging removed. Note: an old plaintext key exists in git history — restrict/rotate it in Cloud Console.
+- **Real POI discovery**: `findCurrentPlace` (which ignored the radius and could only report the venue the device was at) was replaced with the Places Nearby Search web service. Discovery now works around any point, refreshes as the user moves (`TourModeService` rolling refresh), and covers whole navigation routes (`getPlacesAlongRoute` + `updateRouteCorridor`).
+- **Real facts instead of mock content**: `ContentServiceImpl` narrates Wikipedia article intros (geosearch + title matching), cached untrimmed in Room (`tour_content` table, DB v2) and trimmed to the user's detail level at serve time. Template fallback when no article exists. The duplicate mock generator in `TourContentRepository` was removed; it now delegates to `ContentService`.
+- **Navigation prompts interrupt and resume narration**: `AudioService.speakPriority()` pauses tour narration, plays the prompt, and resumes from the interrupted sentence. `AudioServiceImpl` now uses one persistent `UtteranceProgressListener` (per-call listeners used to clobber each other).
+- **Double voice prompts fixed**: MainActivity spoke each instruction twice per status update (two `showNextInstruction` call sites) and re-announced on every location tick; now a single call path with per-maneuver dedup.
+- **Geofence background start fixed**: `GeofenceBroadcastReceiver` uses `startForegroundService()`, and `TourModeService.onStartCommand` calls `startForeground()` immediately (plain `startService()` from the background throws on Android 8+).
+- **Camera follows like Google Maps**: following disengages on user pan/zoom and re-engages via the recenter FAB; the duplicate red "You are here" marker was removed in favor of the built-in my-location dot.
+- **Photo URLs fixed**: `photoUrl` was being set to photo *attributions* text; nearby search results now build real photo URLs from `photo_reference`.
+- **Compile errors fixed**: nonexistent `MapsInitializer.setApiKey`, undeclared `progressEta`, invalid `.kotlinx.coroutines.flow.first()` chains, and a suspend call outside a coroutine.
+- **Collector leak fixed**: `PlacesViewModel.updateAudioSettings` no longer starts an endless preferences collector per call.
+- **Thread-safe content queue**: delivery queue extracted into `ContentDeliveryQueue` with synchronized access.
+- **Unit tests added** (50 tests): polyline decoding, geo math, route sampling, geofence radius, content priority, delivery queue ordering, Places/Wikipedia response parsing, detail-level trimming, TTS resume-position logic.
+
+## Remaining TODOs
+
+- Route corridor refresh after re-routing: the corridor is registered once per navigation session; re-register when `NavigationServiceImpl` recalculates after an off-route detection (e.g., expose a route-version flag in `NavigationStatus`).
+- User-facing error messages: standardize and surface actionable messages for Directions/Places failures in UI.
+- UI/UX polish: accurate audio progress, cancel during route calculation, surface monitoring status (battery/speed), category-styled POI markers, a "fact card" that slides up as narration plays.
+- Dependency updates: Places SDK 3.3.0 → 4.x (Autocomplete `TypeFilter` and `Place.Field.NAME` are deprecated), `LocationRequest.create()` → `LocationRequest.Builder` in MainActivity.
+- Production key hygiene: split SDK vs web-service API keys; proxy Directions/Places web calls through a backend.
+- Instrumented tests for MainActivity flows and TourModeService.

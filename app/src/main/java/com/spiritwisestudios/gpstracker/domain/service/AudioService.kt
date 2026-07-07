@@ -27,12 +27,22 @@ interface AudioService {
     
     /**
      * Speak the provided text.
-     * 
+     *
      * @param text The text to speak
      * @return Flow emitting the current speaking status
      */
     fun speak(text: String): Flow<SpeakingStatus>
-    
+
+    /**
+     * Speak a high-priority prompt (e.g., a navigation instruction).
+     * Any ongoing narration is paused and automatically resumed from the
+     * start of the interrupted sentence once the prompt finishes.
+     *
+     * @param text The prompt to speak
+     * @return Flow emitting the prompt's speaking status
+     */
+    fun speakPriority(text: String): Flow<SpeakingStatus>
+
     /**
      * Pause the current speech.
      * 

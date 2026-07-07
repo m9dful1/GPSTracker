@@ -31,6 +31,7 @@ import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.maps.model.Marker
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.gms.maps.model.PolylineOptions
+import com.google.android.gms.maps.UiSettings
 import com.google.android.libraries.places.api.net.PlacesClient
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.textfield.TextInputEditText
@@ -62,20 +63,15 @@ import com.google.android.libraries.places.widget.AutocompleteActivity
 import android.app.Activity
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.common.api.Status
-import android.animation.ValueAnimator
 import android.os.Looper
+import com.spiritwisestudios.gpstracker.util.GeoUtils
 import com.google.android.libraries.places.api.model.RectangularBounds
 import com.spiritwisestudios.gpstracker.databinding.ActivityMainBinding
 import com.google.android.gms.maps.model.CameraPosition
 import java.util.ArrayDeque
 import android.util.Log
 
-#if DEBUG
-private fun logEncryptedApiKey(plainApiKey: String) {
-    val encrypted = com.spiritwisestudios.gpstracker.util.ApiKeyManager.getInstance(this).encryptApiKey(plainApiKey)
-    Log.d("ApiKeyEncryption", "Encrypted API Key: $encrypted")
-}
-#endif
+// Removed debug-time API key logger to avoid accidental key exposure
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarkerClickListener, 
@@ -84,20 +80,31 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     private lateinit var mMap: GoogleMap
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
-    
+
     @Inject
     lateinit var placesClient: PlacesClient
-    
+
     // Use the viewModels() delegate to get the ViewModel from Hilt
     private val placesViewModel: PlacesViewModel by viewModels()
-    
-    private var currentMarker: Marker? = null
+
     private val poiMarkers = mutableMapOf<String, Marker>()
     private val LOCATION_PERMISSION_REQUEST = 1
     private val BACKGROUND_LOCATION_PERMISSION_REQUEST = 2
 
     // Flag to check if this is the first location update
     private var isFirstUpdate = true
+
+    // Last known device position (the map's built-in blue dot renders it)
+    private var lastKnownLatLng: LatLng? = null
+
+    // Camera follows the user until they pan/zoom; recenter FAB re-engages
+    private var isFollowingUser = true
+
+    // Where we last searched for POIs; refetch after moving far enough
+    private var lastPoiFetchCenter: LatLng? = null
+
+    // Dedup key so the same instruction isn't spoken on every location tick
+    private var lastAnnouncementKey: String? = null
     
     // Tour mode service connection
     private var tourModeService: TourModeService? = null
@@ -149,6 +156,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
 
     companion object {
         private const val AUTOCOMPLETE_REQUEST_CODE = 1001
+        private const val POI_REFETCH_DISTANCE_METERS = 300f
     }
     
     // ActivityResultLauncher for Places Autocomplete
@@ -210,18 +218,14 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         // Initialize UI elements
         initializeUIElements()
 
-        // Verify API key setup
-        val apiKey = com.spiritwisestudios.gpstracker.util.ApiKeyManager.getInstance(this).getGoogleMapsApiKey()
-        println(apiKey)
-        if (apiKey.isNullOrEmpty() || apiKey == "YOUR API KEY") {
-            Timber.e("API key is not properly configured")
+        // Verify API key setup (injected from local.properties at build time)
+        if (BuildConfig.MAPS_API_KEY.isEmpty()) {
+            Timber.e("API key is not configured")
             Toast.makeText(
                 this,
-                "Google API key is not configured. Please set up your API key.",
+                "Google API key is not configured. Add MAPS_API_KEY to local.properties.",
                 Toast.LENGTH_LONG
             ).show()
-        } else {
-            Timber.d("API key is configured: ${apiKey.take(5)}...")
         }
 
         // Initialize the map fragment and request the map to be ready.
@@ -238,10 +242,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             override fun onLocationResult(locationResult: LocationResult) {
                 locationResult.lastLocation?.let { location ->
                     updateLocationOnMap(location)
-                    // Fetch nearby places when location updates
-                    if (isFirstUpdate) {
-                        fetchNearbyPlaces()
-                    }
+                    refreshNearbyPlacesIfNeeded()
                 }
             }
         }
@@ -318,6 +319,26 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             } else {
                 Toast.makeText(this, "Please enter a destination", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        // Recenter FAB re-engages camera following
+        findViewById<FloatingActionButton>(R.id.fab_recenter).setOnClickListener {
+            isFollowingUser = true
+            lastKnownLatLng?.let { pos ->
+                mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(pos, 18f))
+            }
+        }
+
+        // Layers FAB: toggle traffic and cycle map types
+        findViewById<FloatingActionButton>(R.id.fab_layers).setOnClickListener {
+            mMap.isTrafficEnabled = !mMap.isTrafficEnabled
+            mMap.mapType = when (mMap.mapType) {
+                GoogleMap.MAP_TYPE_NORMAL -> GoogleMap.MAP_TYPE_SATELLITE
+                GoogleMap.MAP_TYPE_SATELLITE -> GoogleMap.MAP_TYPE_TERRAIN
+                GoogleMap.MAP_TYPE_TERRAIN -> GoogleMap.MAP_TYPE_HYBRID
+                else -> GoogleMap.MAP_TYPE_NORMAL
+            }
+            Toast.makeText(this, "Traffic: ${mMap.isTrafficEnabled}", Toast.LENGTH_SHORT).show()
         }
         
         // Set up editor action listener for the destination EditText
@@ -446,7 +467,21 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             Timber.d("Map fully loaded. Current position: $currentPosition")
             mMap.moveCamera(CameraUpdateFactory.newCameraPosition(currentPosition))
         }
-        
+        // Enable common Google Maps UI elements
+        mMap.uiSettings.isCompassEnabled = true
+        mMap.uiSettings.isZoomControlsEnabled = false // Keep clean; pinch to zoom
+        mMap.uiSettings.isMapToolbarEnabled = true
+        mMap.uiSettings.isRotateGesturesEnabled = true
+        mMap.uiSettings.isTiltGesturesEnabled = true
+
+        // Stop following the user when they pan/zoom manually (Google Maps
+        // behavior); the recenter FAB turns following back on.
+        mMap.setOnCameraMoveStartedListener { reason ->
+            if (reason == GoogleMap.OnCameraMoveStartedListener.REASON_GESTURE) {
+                isFollowingUser = false
+            }
+        }
+
         enableMyLocation()
     }
 
@@ -501,40 +536,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         }
     }
 
-    // Update the map with the new location data
+    // Update the map with the new location data. The map's built-in
+    // my-location layer renders the blue position dot; we only manage the camera.
     private fun updateLocationOnMap(location: Location) {
-        Timber.d("updateLocationOnMap called with location: ${location.latitude}, ${location.longitude}")
         val newLatLng = LatLng(location.latitude, location.longitude)
-        
-        if (currentMarker == null) {
-            // Create marker on first run
-            currentMarker = mMap.addMarker(
-                MarkerOptions()
-                    .position(newLatLng)
-                    .title("You are here")
-                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
-                    .anchor(0.5f, 0.5f) // Center the marker icon
-                    .flat(true) // Flat markers look better during animation
-            )
-        } else {
-            // Animate marker movement for smoother transitions
-            val oldLatLng = currentMarker!!.position
-            
-            val animator = ValueAnimator.ofFloat(0f, 1f)
-            animator.duration = 1000 // Animation duration in milliseconds
-            
-            animator.addUpdateListener { animation ->
-                val fraction = animation.animatedValue as Float
-                val lat = oldLatLng.latitude + (newLatLng.latitude - oldLatLng.latitude) * fraction
-                val lng = oldLatLng.longitude + (newLatLng.longitude - oldLatLng.longitude) * fraction
-                
-                currentMarker?.position = LatLng(lat, lng)
-            }
-            
-            animator.start()
-        }
+        lastKnownLatLng = newLatLng
 
-        // If this is the first update, set the zoom level; otherwise, just update the location.
         if (isFirstUpdate) {
             Timber.d("First location update, animating camera with zoom")
             mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(newLatLng, 18f), object : GoogleMap.CancelableCallback {
@@ -549,12 +556,22 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
                 }
             })
             isFirstUpdate = false
-        } else {
-            Timber.d("Subsequent location update, animating camera without zoom")
-            
-            // For smoother camera movements
-            val cameraUpdate = CameraUpdateFactory.newLatLng(newLatLng)
-            mMap.animateCamera(cameraUpdate, 1000, null)
+        } else if (isFollowingUser && !isNavigating) {
+            // Navigation drives its own tilted/bearing camera; outside of it,
+            // follow the user unless they've panned away.
+            mMap.animateCamera(CameraUpdateFactory.newLatLng(newLatLng), 1000, null)
+        }
+    }
+
+    // Fetch POIs around the current position, and again after moving far
+    // enough that the old results are stale.
+    private fun refreshNearbyPlacesIfNeeded() {
+        val current = lastKnownLatLng ?: return
+        val lastFetch = lastPoiFetchCenter
+
+        if (lastFetch == null || GeoUtils.distanceMeters(lastFetch, current) > POI_REFETCH_DISTANCE_METERS) {
+            lastPoiFetchCenter = current
+            placesViewModel.fetchNearbyPlaces(center = current, radius = 500)
         }
     }
 
@@ -581,11 +598,6 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
                 }
             }
         }
-    }
-
-    // Fetch nearby places using the ViewModel
-    private fun fetchNearbyPlaces() {
-        placesViewModel.fetchNearbyPlaces(radius = 500)
     }
 
     // Display points of interest on the map
@@ -620,11 +632,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
 
     // Handle marker clicks to show point of interest details
     override fun onMarkerClick(marker: Marker): Boolean {
-        // Skip if it's the current location marker
-        if (marker == currentMarker) return false
-        
         // Get the Google Place ID from the marker's tag
-        val placeId = marker.tag as? String ?: return false // Renamed poiId to placeId
+        val placeId = marker.tag as? String ?: return false
         
         // Select the place using the correct Google Place ID to show details
         placesViewModel.selectPlace(placeId) // Pass the correct placeId
@@ -774,20 +783,27 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
                 
                 // Start collecting navigation updates
                 lifecycleScope.launch {
+                    var corridorSent = false
                     navigationService.startNavigation(destinationLatLng).collectLatest { status ->
+                        // Also shows the next instruction when one is available
                         updateNavigationStatus(status, displayName)
-                        
+
                         // Draw the route - moved this here to ensure route data is available
                         drawRouteFromNavigationService()
-                        
+
+                        // Register the POIs along this route with tour mode so
+                        // narration follows the drive
+                        if (!corridorSent) {
+                            val route = navigationService.getCurrentRoute()
+                            if (route.isNotEmpty()) {
+                                tourModeService?.updateRouteCorridor(route)
+                                corridorSent = true
+                            }
+                        }
+
                         // Update camera to follow user if in navigation mode
                         status.currentLocation.let { currentLocation ->
                             updateCameraForNavigation(currentLocation)
-                        }
-                        
-                        // Show next instruction if available
-                        status.nextInstruction?.let { instruction ->
-                            showNextInstruction(instruction, status.announcementTiming)
                         }
                     }
                 }
@@ -812,7 +828,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
                 routePolyline?.remove()
                 
                 // Get current location and destination
-                val currentLocation = currentMarker?.position ?: return
+                val currentLocation = lastKnownLatLng ?: return
                 val destination = routePoints.lastOrNull() ?: return
                 
                 // Make sure destination marker exists
@@ -852,9 +868,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     
     // Update camera position for active navigation
     private fun updateCameraForNavigation(currentLocation: LatLng) {
-        // Don't update if we're not in navigation mode
-        if (!isNavigating) return
-        
+        // Don't update if we're not navigating or the user panned away
+        if (!isNavigating || !isFollowingUser) return
+
         // Add location to history
         locationHistory.add(currentLocation)
         if (locationHistory.size > 5) {
@@ -876,37 +892,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     private fun getUserBearing(): Float {
         // Calculate bearing from recent locations if we have enough
         if (locationHistory.size >= 2) {
-            val locations = locationHistory.toList()
-            val recent = locations.takeLast(2)
-            
-            val start = recent[0]
-            val end = recent[1]
-            
-            return calculateBearing(start, end)
+            val recent = locationHistory.toList().takeLast(2)
+            return GeoUtils.bearingDegrees(recent[0], recent[1])
         }
         return 0f
     }
-    
-    // Calculate bearing between two points
-    private fun calculateBearing(start: LatLng, end: LatLng): Float {
-        val lat1 = Math.toRadians(start.latitude)
-        val lat2 = Math.toRadians(end.latitude)
-        val lon1 = Math.toRadians(start.longitude)
-        val lon2 = Math.toRadians(end.longitude)
-        
-        val dLon = lon2 - lon1
-        
-        val y = Math.sin(dLon) * Math.cos(lat2)
-        val x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon)
-        
-        var bearing = Math.toDegrees(Math.atan2(y, x)).toFloat()
-        if (bearing < 0) {
-            bearing += 360f
-        }
-        
-        return bearing
-    }
-    
+
     // Update the navigation status UI
     private fun updateNavigationStatus(status: NavigationService.NavigationStatus, destinationName: String) {
         // Format distance
@@ -935,6 +926,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         // Update UI
         tvNavigationDestination.text = getString(R.string.navigating_to, destinationName)
         tvNavigationInfo.text = "$etaText • ${getString(R.string.distance_remaining, distanceText)}"
+        // Update ETA progress bar roughly based on time remaining
+        val remaining = status.timeRemaining
+        binding.progressEta.progress = when {
+            remaining <= 0 -> 1000
+            else -> (1000.0 * (1.0 - (remaining.coerceAtMost(60 * 60 * 1000L).toDouble() / (60 * 60 * 1000L)))).toInt()
+        }.coerceIn(0, 1000)
         
         // Show the next instruction if available
         status.nextInstruction?.let { instruction ->
@@ -943,22 +940,25 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     }
     
     // Display the next navigation instruction
-    private fun showNextInstruction(instruction: NavigationService.NavigationInstruction, 
+    private fun showNextInstruction(instruction: NavigationService.NavigationInstruction,
                                     announcementTiming: NavigationService.AnnouncementTiming) {
         // Get the maneuver details
         val maneuverDetails = navigationService.getManeuverDetails(instruction)
-        
+
         // Show instruction in the UI
         showTurnInstructionFragment(instruction, maneuverDetails, announcementTiming)
-        
-        // Speak the instruction based on announcement timing
+
+        // Speak the instruction based on announcement timing, but only once per
+        // maneuver+timing — status updates arrive every few seconds
         if (announcementTiming == NavigationService.AnnouncementTiming.IMMEDIATE ||
             announcementTiming == NavigationService.AnnouncementTiming.APPROACHING) {
-            // Format the voice instruction
-            val voiceInstruction = formatInstructionForVoice(instruction, announcementTiming)
-            
-            // Use the PlacesViewModel to speak the text
-            placesViewModel.speakText(voiceInstruction)
+            val announcementKey = "${instruction.maneuverPoint}|${instruction.type}|$announcementTiming"
+            if (announcementKey != lastAnnouncementKey) {
+                lastAnnouncementKey = announcementKey
+                val voiceInstruction = formatInstructionForVoice(instruction, announcementTiming)
+                // Priority prompt: pauses tour narration and resumes it after
+                placesViewModel.speakNavigationPrompt(voiceInstruction)
+            }
         }
     }
     
@@ -1028,18 +1028,22 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         isNavigating = false
         hideNavigationStatus()
         hideTurnInstructions()
-        
+
         // Remove route from map
         routePolyline?.remove()
         routePolyline = null
         destinationMarker?.remove()
         destinationMarker = null
-        
+
         // Stop navigation service
         navigationService.stopNavigation()
-        
-        // Clear location history
+
+        // Back to discovering POIs around the current position
+        tourModeService?.clearRouteCorridor()
+
+        // Clear location history and announcement state
         locationHistory.clear()
+        lastAnnouncementKey = null
     }
 
     // Launch Places Autocomplete
@@ -1057,7 +1061,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             )
 
             // Get current location to use as bias
-            val currentLatLng = currentMarker?.position ?: LatLng(0.0, 0.0)
+            val currentLatLng = lastKnownLatLng ?: LatLng(0.0, 0.0)
             
             // Create a bias rectangle around current location - approx 10km radius
             val bias = RectangularBounds.newInstance(

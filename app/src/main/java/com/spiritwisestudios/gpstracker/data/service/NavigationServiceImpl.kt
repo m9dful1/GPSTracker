@@ -15,6 +15,9 @@ import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,7 +43,8 @@ import kotlin.math.roundToInt
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import org.json.JSONException
-import com.spiritwisestudios.gpstracker.R
+import com.spiritwisestudios.gpstracker.BuildConfig
+import com.spiritwisestudios.gpstracker.util.Polyline
 import java.io.IOException
 import android.graphics.Color
 
@@ -52,10 +56,14 @@ class NavigationServiceImpl @Inject constructor(
     private val geocoder: Geocoder = Geocoder(context, Locale.getDefault())
     private val navigationState = MutableStateFlow<NavigationState>(NavigationState.Inactive)
     private val httpClient = OkHttpClient()
+    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     
     // Add location callback and request
     private var locationCallback: LocationCallback? = null
     private var locationRequest: LocationRequest? = null
+    private var lastRecalculationTimestampMs: Long = 0L
+    private val offRouteDistanceThresholdMeters: Float = 80f
+    private val routeRecalculationCooldownMs: Long = 15_000L
     
     private data class NavigationState(
         val isActive: Boolean = false,
@@ -251,6 +259,45 @@ class NavigationServiceImpl @Inject constructor(
             NavigationService.AnnouncementTiming.NONE
         }
         
+        // Off-route detection and route recalculation (cooldown protected)
+        if (closestRoutePointIndex >= 0 && currentState.currentRoute.isNotEmpty()) {
+            val closestPoint = currentState.currentRoute[closestRoutePointIndex]
+            val distanceToRoute = calculateDistance(newLocation, closestPoint)
+            val now = System.currentTimeMillis()
+            if (distanceToRoute > offRouteDistanceThresholdMeters && (now - lastRecalculationTimestampMs) > routeRecalculationCooldownMs) {
+                lastRecalculationTimestampMs = now
+                val dest = currentState.destination
+                if (dest != null) {
+                    serviceScope.launch {
+                        val routeResult = getRouteFromDirectionsApi(newLocation, dest, currentState.waypoints)
+                        if (routeResult != null) {
+                            navigationState.value = navigationState.value.copy(
+                                currentRoute = routeResult.route,
+                                distanceRemaining = routeResult.distance,
+                                eta = System.currentTimeMillis() + routeResult.duration,
+                                allInstructions = routeResult.instructions,
+                                nextInstruction = routeResult.instructions.firstOrNull(),
+                                currentLocation = newLocation
+                            )
+                            val timing = routeResult.instructions.firstOrNull()?.let { determineAnnouncementTiming(it.distance) }
+                                ?: NavigationService.AnnouncementTiming.NONE
+                            emitStatus(
+                                NavigationService.NavigationStatus(
+                                    isActive = true,
+                                    currentLocation = newLocation,
+                                    distanceRemaining = routeResult.distance,
+                                    timeRemaining = routeResult.duration,
+                                    nextInstruction = navigationState.value.nextInstruction,
+                                    announcementTiming = timing
+                                )
+                            )
+                            return@launch
+                        }
+                    }
+                }
+            }
+        }
+
         // Update arrival time estimate based on remaining route, not just straight line
         val remainingTime = if (closestRoutePointIndex >= 0 && closestRoutePointIndex < currentState.currentRoute.size - 1) {
             // Calculate remaining distance along the route
@@ -423,13 +470,11 @@ class NavigationServiceImpl @Inject constructor(
         }
         
         try {
-            // Get API key directly using R reference
-            val apiKey = com.spiritwisestudios.gpstracker.util.ApiKeyManager.getInstance(context).getGoogleMapsApiKey()
-            Timber.d("Using API key: ${apiKey.take(8)}...")
-            
-            // Validate API key
+            val apiKey = BuildConfig.MAPS_API_KEY
+
+            // Validate API key (never log the key itself)
             if (!isValidApiKey(apiKey)) {
-                Timber.e("Invalid Google Maps API key: $apiKey")
+                Timber.e("Google Maps API key is missing or malformed — check MAPS_API_KEY in local.properties")
                 return@withContext null
             }
             
@@ -448,9 +493,8 @@ class NavigationServiceImpl @Inject constructor(
                     "&mode=driving" +
                     "&key=$apiKey"
             
-            // Log the URL (without the full API key)
-            val debugUrl = url.replace(apiKey, "${apiKey.take(8)}...")
-            Timber.d("Making Directions API request: $debugUrl")
+            // Log the URL without the API key
+            Timber.d("Making Directions API request: ${url.replace(apiKey, "***")}")
             
             // Make the request
             val request = Request.Builder()
@@ -565,7 +609,7 @@ class NavigationServiceImpl @Inject constructor(
                 
                 // Decode the polyline
                 val overviewPolyline = route.getJSONObject("overview_polyline").getString("points")
-                val polylinePoints = decodePolyline(overviewPolyline)
+                val polylinePoints = Polyline.decode(overviewPolyline)
                 
                 // Before returning the route result
                 Timber.d("Successfully parsed route with ${polylinePoints.size} points, distance: ${totalDistance}m, duration: ${totalDuration}ms")
@@ -587,48 +631,6 @@ class NavigationServiceImpl @Inject constructor(
             Timber.e(e, "Unexpected error getting route: ${e.message}")
             return@withContext null
         }
-    }
-    
-    /**
-     * Decode a polyline string into a list of LatLng
-     */
-    private fun decodePolyline(encoded: String): List<LatLng> {
-        val poly = ArrayList<LatLng>()
-        var index = 0
-        val len = encoded.length
-        var lat = 0
-        var lng = 0
-        
-        while (index < len) {
-            var b: Int
-            var shift = 0
-            var result = 0
-            do {
-                b = encoded[index++].code - 63
-                result = result or (b and 0x1f shl shift)
-                shift += 5
-            } while (b >= 0x20)
-            val dlat = if (result and 1 != 0) (result shr 1).inv() else result shr 1
-            lat += dlat
-            
-            shift = 0
-            result = 0
-            do {
-                b = encoded[index++].code - 63
-                result = result or (b and 0x1f shl shift)
-                shift += 5
-            } while (b >= 0x20)
-            val dlng = if (result and 1 != 0) (result shr 1).inv() else result shr 1
-            lng += dlng
-            
-            val p = LatLng(
-                lat.toDouble() / 1E5,
-                lng.toDouble() / 1E5
-            )
-            poly.add(p)
-        }
-        
-        return poly
     }
     
     /**

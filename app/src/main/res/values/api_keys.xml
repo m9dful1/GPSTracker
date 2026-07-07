@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!--
-      The API key below is encrypted. To update, use ApiKeyManager.encryptApiKey("YOUR_API_KEY")
-      and replace the value. Never store plain API keys in source control.
-    -->
-    <string name="google_maps_key_encrypted" translatable="false" templateMergeStrategy="preserve">ENCRYPTED_API_KEY_PLACEHOLDER</string>
-</resources> 

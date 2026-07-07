@@ -17,15 +17,17 @@ class GetNearbyPointsOfInterestUseCase @Inject constructor(
     /**
      * Get nearby points of interest filtered based on user preferences.
      *
+     * @param center Location to search around
      * @param userPreferences User preferences for filtering
      * @param radiusInMeters Search radius in meters
      * @return Flow of filtered points of interest
      */
     operator fun invoke(
+        center: LatLng,
         userPreferences: UserPreferences? = null,
         radiusInMeters: Int = userPreferences?.notifyDistance ?: 500
     ): Flow<List<PointOfInterest>> {
-        return placesRepository.getNearbyPlaces(radiusInMeters).map { places ->
+        return placesRepository.getNearbyPlaces(center, radiusInMeters).map { places ->
             // Filter places based on user preferences
             if (userPreferences != null && userPreferences.preferredCategories.isNotEmpty()) {
                 places.filter { 

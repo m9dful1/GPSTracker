@@ -7,7 +7,7 @@ The Google Maps wasn't rendering properly in the application. The logs revealed 
 Google Maps Android API E  Authorization failure. 
 Ensure that the "Google Maps Android API v2" is enabled.
 Ensure that the following Android Key exists:
-API Key: AIzaSyASDymHsKY9mAZ1-INzVhVskC7x4EVCPg0
+API Key: <redacted — see local.properties>
 Android Application (<cert_fingerprint>;<package_name>): 2D:B7:5A:31:71:CE:9F:40:6C:F3:6B:D8:0D:5B:8C:13:8B:62:B1:3E;com.spiritwisestudios.gpstracker
 ```
 
@@ -17,10 +17,9 @@ The API key was properly included in the application code, but it wasn't properl
 ## Solution Implemented
 
 1. **Consolidated the API Key Storage**:
-   - Ensured the same API key is used in all locations:
-     - `AndroidManifest.xml`
-     - `strings.xml`
-     - `api_keys.xml`
+   - The key now lives in a single place: `MAPS_API_KEY` in `local.properties`
+     (gitignored). Gradle injects it into the manifest and `BuildConfig` at
+     build time — see `api_key_setup.md`.
 
 2. **Documentation**:
    - Created an API key setup guide (`api_key_setup.md`) that explains how to properly configure the API key in Google Cloud Console.
