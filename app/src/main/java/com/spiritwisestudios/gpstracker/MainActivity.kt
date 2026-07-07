@@ -66,6 +66,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.common.api.Status
 import android.os.Looper
 import com.spiritwisestudios.gpstracker.util.GeoUtils
+import com.spiritwisestudios.gpstracker.util.MarkerStyling
 import com.google.android.libraries.places.api.model.RectangularBounds
 import com.spiritwisestudios.gpstracker.databinding.ActivityMainBinding
 import com.google.android.gms.maps.model.CameraPosition
@@ -660,8 +661,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
                     MarkerOptions()
                         .position(poi.latLng)
                         .title(poi.name)
-                        .snippet(poi.category)
-                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE))
+                        .snippet(if (poi.isVisited) "${poi.category} · already narrated" else poi.category)
+                        .icon(BitmapDescriptorFactory.defaultMarker(MarkerStyling.hueFor(poi.category)))
+                        .alpha(MarkerStyling.alphaFor(poi.isVisited))
                 )
                 marker?.let { 
                     poiMarkers[poi.id] = it // Keep using internal ID for the map key if needed
