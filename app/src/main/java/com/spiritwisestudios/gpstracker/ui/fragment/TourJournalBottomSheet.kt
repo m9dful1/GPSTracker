@@ -1,5 +1,6 @@
 package com.spiritwisestudios.gpstracker.ui.fragment
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -15,6 +16,7 @@ import com.spiritwisestudios.gpstracker.databinding.BottomSheetTourJournalBindin
 import com.spiritwisestudios.gpstracker.databinding.ItemJournalEntryBinding
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
+import com.spiritwisestudios.gpstracker.util.JournalFormatter
 import dagger.hilt.android.AndroidEntryPoint
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -63,7 +65,21 @@ class TourJournalBottomSheet : BottomSheetDialogFragment() {
                 1 -> "1 place discovered"
                 else -> "${places.size} places discovered"
             }
+            binding.btnJournalShare.isEnabled = places.isNotEmpty()
         })
+
+        binding.btnJournalShare.setOnClickListener {
+            val places = placesViewModel.visitedPlaces.value ?: return@setOnClickListener
+            val dateFormat = SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())
+            val text = JournalFormatter.shareText(places) { millis ->
+                dateFormat.format(Date(millis))
+            }
+            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            startActivity(Intent.createChooser(sendIntent, "Share your tour journal"))
+        }
     }
 
     override fun onDestroyView() {
