@@ -3,12 +3,21 @@ package com.spiritwisestudios.gpstracker.domain.service
 import com.spiritwisestudios.gpstracker.domain.model.TourContent
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Service interface for text-to-speech and audio management functionality.
  */
 interface AudioService {
-    
+
+    /**
+     * Progress through the current narration as a fraction of [0, 1].
+     * Resets when a narration starts and jumps to 1 on completion.
+     * Word-level granularity needs API 26+ (onRangeStart); older devices
+     * only see the 0 and 1 endpoints. Navigation prompts don't move it.
+     */
+    val speechProgress: StateFlow<Float>
+
     /**
      * Initialize the text-to-speech engine.
      * 

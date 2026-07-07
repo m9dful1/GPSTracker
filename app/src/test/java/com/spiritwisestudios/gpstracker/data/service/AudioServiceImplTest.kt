@@ -32,4 +32,24 @@ class AudioServiceImplTest {
         val result = AudioServiceImpl.resumeTextFrom(text, text.length)
         assertEquals("Third one closes.", result)
     }
+
+    // --- progressFraction ---
+
+    @Test
+    fun `progress fraction tracks position through the text`() {
+        assertEquals(0f, AudioServiceImpl.progressFraction(0, 100))
+        assertEquals(0.5f, AudioServiceImpl.progressFraction(50, 100))
+        assertEquals(1f, AudioServiceImpl.progressFraction(100, 100))
+    }
+
+    @Test
+    fun `progress fraction is clamped to valid range`() {
+        assertEquals(1f, AudioServiceImpl.progressFraction(150, 100))
+        assertEquals(0f, AudioServiceImpl.progressFraction(-5, 100))
+    }
+
+    @Test
+    fun `empty text yields zero progress instead of dividing by zero`() {
+        assertEquals(0f, AudioServiceImpl.progressFraction(10, 0))
+    }
 }

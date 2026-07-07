@@ -14,6 +14,8 @@ import com.spiritwisestudios.gpstracker.domain.service.AudioService
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import timber.log.Timber
@@ -61,6 +63,15 @@ class AudioServiceImpl @Inject constructor(
 
             return text.substring(boundary).trim().ifEmpty { text }
         }
+
+        /**
+         * Fraction of an utterance spoken so far, given the character index
+         * the engine is currently speaking.
+         */
+        internal fun progressFraction(charIndex: Int, textLength: Int): Float {
+            if (textLength <= 0) return 0f
+            return (charIndex.toFloat() / textLength).coerceIn(0f, 1f)
+        }
     }
 
     private var textToSpeech: TextToSpeech? = null
@@ -71,6 +82,9 @@ class AudioServiceImpl @Inject constructor(
     private var pendingResume: PendingNarration? = null
     private var lastSpeakingPosition = 0
     private var isPaused = false
+
+    private val _speechProgress = MutableStateFlow(0f)
+    override val speechProgress: StateFlow<Float> = _speechProgress
 
     // Audio Manager for handling audio focus
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -104,10 +118,13 @@ class AudioServiceImpl @Inject constructor(
     // Single persistent listener; dispatches to the current utterance's flow
     private val progressListener = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String) {
-            val channel = synchronized(lock) {
-                current?.takeIf { it.id == utteranceId }?.channel
+            val started = synchronized(lock) {
+                current?.takeIf { it.id == utteranceId }
             }
-            channel?.trySend(AudioService.SpeakingStatus.STARTED)
+            if (started != null && !started.isPrompt) {
+                _speechProgress.value = 0f
+            }
+            started?.channel?.trySend(AudioService.SpeakingStatus.STARTED)
         }
 
         override fun onDone(utteranceId: String) {
@@ -124,13 +141,16 @@ class AudioServiceImpl @Inject constructor(
         }
 
         override fun onRangeStart(utteranceId: String, start: Int, end: Int, frame: Int) {
-            val channel = synchronized(lock) {
+            val speaking = synchronized(lock) {
                 if (current?.id == utteranceId) {
                     lastSpeakingPosition = start
-                    current?.channel
+                    current
                 } else null
             }
-            channel?.trySend(AudioService.SpeakingStatus.IN_PROGRESS)
+            if (speaking != null && !speaking.isPrompt) {
+                _speechProgress.value = progressFraction(start, speaking.text.length)
+            }
+            speaking?.channel?.trySend(AudioService.SpeakingStatus.IN_PROGRESS)
         }
 
         override fun onStop(utteranceId: String, interrupted: Boolean) {
@@ -268,6 +288,7 @@ class AudioServiceImpl @Inject constructor(
             isPaused = false
             lastSpeakingPosition = 0
         }
+        _speechProgress.value = 0f
         textToSpeech?.stop()
         releaseAudioFocus()
     }
@@ -337,6 +358,10 @@ class AudioServiceImpl @Inject constructor(
                 toResume = pendingResume
                 pendingResume = null
             }
+        }
+
+        if (!finished.isPrompt) {
+            _speechProgress.value = if (error) 0f else 1f
         }
 
         val status = if (error) AudioService.SpeakingStatus.ERROR else AudioService.SpeakingStatus.COMPLETED

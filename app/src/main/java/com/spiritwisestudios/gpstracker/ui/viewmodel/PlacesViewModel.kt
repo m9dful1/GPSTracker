@@ -47,7 +47,10 @@ class PlacesViewModel @Inject constructor(
     
     // User preferences from the repository
     val userPreferences = userPreferencesRepository.userPreferencesFlow.asLiveData()
-    
+
+    // How far through the current narration the TTS engine is, 0..1
+    val narrationProgress = audioService.speechProgress.asLiveData()
+
     // Tour content for the selected place
     private val _selectedPlaceContent = MutableLiveData<TourContent?>()
     val selectedPlaceContent: LiveData<TourContent?> = _selectedPlaceContent

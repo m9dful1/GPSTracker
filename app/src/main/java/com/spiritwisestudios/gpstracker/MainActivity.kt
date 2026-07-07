@@ -376,6 +376,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
                 placesViewModel.clearError()
             }
         })
+
+        // Fill the fact card's progress bar as the narration is spoken
+        placesViewModel.narrationProgress.observe(this, Observer { fraction ->
+            binding.progressNarration.progress = (fraction * 100).toInt().coerceIn(0, 100)
+        })
     }
     
     private fun observeTourModeServiceState() {

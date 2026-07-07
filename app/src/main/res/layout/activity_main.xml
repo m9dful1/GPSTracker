@@ -213,6 +213,16 @@
                     android:scrollbars="vertical"
                     android:textAppearance="?attr/textAppearanceBody2" />
 
+                <ProgressBar
+                    android:id="@+id/progress_narration"
+                    style="@android:style/Widget.ProgressBar.Horizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="3dp"
+                    android:layout_marginTop="8dp"
+                    android:max="100"
+                    android:progress="0"
+                    android:indeterminate="false" />
+
                 <TextView
                     android:id="@+id/tv_narration_hint"
                     android:layout_width="wrap_content"
