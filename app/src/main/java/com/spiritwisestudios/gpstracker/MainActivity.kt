@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.IBinder
 import android.text.method.ScrollingMovementMethod
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.TextView
@@ -21,6 +22,9 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
 import androidx.core.app.ActivityCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.Observer
 import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.location.*
@@ -229,6 +233,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         // Initialize UI elements
         initializeUIElements()
 
+        // Keep controls clear of the system bars: targetSdk 35 draws
+        // edge-to-edge, so the 3-button nav bar otherwise covers the
+        // bottom FABs and cards (gesture nav has a much smaller inset)
+        applyWindowInsets()
+
         // Verify API key setup (injected from local.properties at build time)
         if (BuildConfig.MAPS_API_KEY.isEmpty()) {
             Timber.e("API key is not configured")
@@ -288,6 +297,44 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         findViewById<View>(R.id.turn_instruction_container)
     }
     
+    /**
+     * Add the system-bar insets to the edge-anchored controls. The map
+     * itself stays edge-to-edge; only the controls move. The layout's
+     * margins are treated as design margins with the inset added on top,
+     * so gesture nav gets a small lift and the 3-button bar a full one.
+     */
+    private fun applyWindowInsets() {
+        val bottomViews = listOf<View>(
+            binding.fabTourMode, binding.fabNavigation, binding.fabRecenter,
+            binding.fabLayers, binding.fabJournal, binding.bottomCards
+        )
+        val topViews = listOf<View>(
+            binding.turnInstructionContainer, binding.tourModeStatus,
+            binding.gpsStatusCard, destinationInputView
+        )
+        val baseBottomMargins = bottomViews.associateWith {
+            (it.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin
+        }
+        val baseTopMargins = topViews.associateWith {
+            (it.layoutParams as ViewGroup.MarginLayoutParams).topMargin
+        }
+
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
+            val bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+            bottomViews.forEach { view ->
+                view.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                    bottomMargin = baseBottomMargins.getValue(view) + bars.bottom
+                }
+            }
+            topViews.forEach { view ->
+                view.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                    topMargin = baseTopMargins.getValue(view) + bars.top
+                }
+            }
+            windowInsets
+        }
+    }
+
     private fun setupClickListeners() {
         // Set up click listener for the tour mode FAB
         fabTourMode.setOnClickListener {
@@ -582,6 +629,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         mMap.uiSettings.isMapToolbarEnabled = true
         mMap.uiSettings.isRotateGesturesEnabled = true
         mMap.uiSettings.isTiltGesturesEnabled = true
+
+        // Move Google's own UI (logo, compass) clear of the system bars too
+        ViewCompat.getRootWindowInsets(binding.root)
+            ?.getInsets(WindowInsetsCompat.Type.systemBars())
+            ?.let { bars -> mMap.setPadding(0, bars.top, 0, bars.bottom) }
 
         // Stop following the user when they pan/zoom manually (Google Maps
         // behavior); the recenter FAB turns following back on.

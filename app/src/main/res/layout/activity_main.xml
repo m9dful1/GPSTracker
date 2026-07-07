@@ -157,6 +157,7 @@
         
     <!-- Bottom cards: the fact card stacks above the navigation card -->
     <LinearLayout
+        android:id="@+id/bottom_cards"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
