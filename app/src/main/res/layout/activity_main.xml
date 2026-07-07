@@ -233,6 +233,16 @@
                     android:textAppearance="?attr/textAppearanceCaption"
                     android:visibility="gone" />
 
+                <TextView
+                    android:id="@+id/tv_narration_source"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="From Wikipedia — read the full article"
+                    android:textAppearance="?attr/textAppearanceCaption"
+                    android:textColor="?attr/colorPrimary"
+                    android:visibility="gone" />
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

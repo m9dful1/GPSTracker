@@ -554,7 +554,8 @@ class TourModeService : Service() {
                 poiName = poi?.name ?: content.title,
                 category = poi?.category,
                 factText = content.content,
-                upNextTitle = upNextTitle()
+                upNextTitle = upNextTitle(),
+                sourceUrl = content.metadata["sourceUrl"]
             )
 
             // Speak the content, introduced like a live tour guide
@@ -828,7 +829,9 @@ class TourModeService : Service() {
         val poiName: String,
         val category: String?,
         val factText: String,
-        val upNextTitle: String? = null
+        val upNextTitle: String? = null,
+        /** Wikipedia article URL when the fact came from there. */
+        val sourceUrl: String? = null
     )
 
     /**

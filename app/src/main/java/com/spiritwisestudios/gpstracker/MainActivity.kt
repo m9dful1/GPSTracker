@@ -3,7 +3,9 @@ package com.spiritwisestudios.gpstracker
 import android.Manifest
 import android.content.ComponentName
 import android.content.Context
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.net.Uri
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.location.Location
@@ -470,6 +472,20 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         binding.tvNarrationUpNext.text = upNext?.let { "Up next: $it" } ?: ""
         binding.tvNarrationUpNext.visibility =
             if (upNext.isNullOrBlank()) View.GONE else View.VISIBLE
+
+        // Attribution + "tell me more" path for Wikipedia-sourced facts
+        val sourceUrl = narration.sourceUrl
+        binding.tvNarrationSource.visibility =
+            if (sourceUrl.isNullOrBlank()) View.GONE else View.VISIBLE
+        binding.tvNarrationSource.setOnClickListener {
+            sourceUrl?.let { url ->
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                } catch (e: ActivityNotFoundException) {
+                    Toast.makeText(this, "No browser available to open the article", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
 
         // Tapping the card opens the full details sheet for the narrated place
         binding.tvNarrationHint.visibility =
