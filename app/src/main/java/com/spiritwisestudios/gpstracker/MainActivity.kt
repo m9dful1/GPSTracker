@@ -27,6 +27,8 @@ import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.OnMapReadyCallback
 import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.Circle
+import com.google.android.gms.maps.model.CircleOptions
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.maps.model.Marker
@@ -106,6 +108,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     // Where we last searched for POIs; refetch after moving far enough
     private var lastPoiFetchCenter: LatLng? = null
 
+    // Outline of the area scouted via map long-press, if any
+    private var scoutCircle: Circle? = null
+
     // Dedup key so the same instruction isn't spoken on every location tick
     private var lastAnnouncementKey: String? = null
     
@@ -160,6 +165,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     companion object {
         private const val AUTOCOMPLETE_REQUEST_CODE = 1001
         private const val POI_REFETCH_DISTANCE_METERS = 300f
+        private const val SCOUT_RADIUS_METERS = 750
     }
     
     // ActivityResultLauncher for Places Autocomplete
@@ -551,7 +557,34 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             }
         }
 
+        // Long-press anywhere to scout that area for interesting places —
+        // preview a destination before driving there
+        mMap.setOnMapLongClickListener { point ->
+            scoutArea(point)
+        }
+
         enableMyLocation()
+    }
+
+    /**
+     * Discover POIs around an arbitrary map point instead of the user's
+     * location. Deliberately leaves lastPoiFetchCenter alone: while parked
+     * and planning, scouted markers stay put; once the user moves far
+     * enough, the regular around-me refresh replaces them.
+     */
+    private fun scoutArea(point: LatLng) {
+        scoutCircle?.remove()
+        scoutCircle = mMap.addCircle(
+            CircleOptions()
+                .center(point)
+                .radius(SCOUT_RADIUS_METERS.toDouble())
+                .strokeWidth(2f)
+                .strokeColor(0x8834A853.toInt())
+                .fillColor(0x1434A853)
+        )
+
+        placesViewModel.fetchNearbyPlaces(center = point, radius = SCOUT_RADIUS_METERS)
+        Toast.makeText(this, "Scouting this area for interesting places…", Toast.LENGTH_SHORT).show()
     }
 
     // Request location permission and start location updates if permission is granted
@@ -640,6 +673,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
 
         if (lastFetch == null || GeoUtils.distanceMeters(lastFetch, current) > POI_REFETCH_DISTANCE_METERS) {
             lastPoiFetchCenter = current
+            // Moving on replaces any scouted area with local results
+            scoutCircle?.remove()
+            scoutCircle = null
             placesViewModel.fetchNearbyPlaces(center = current, radius = 500)
         }
     }
