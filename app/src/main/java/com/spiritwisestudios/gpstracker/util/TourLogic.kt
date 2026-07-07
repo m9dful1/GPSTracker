@@ -47,6 +47,32 @@ object TourLogic {
     }
 
     /**
+     * Spoken confirmation when tour mode starts, so the user hears that
+     * audio works and knows what to expect instead of getting silence
+     * until the first geofence fires.
+     */
+    fun tourStartAnnouncement(placeCount: Int): String {
+        return when {
+            placeCount <= 0 -> "Tour mode is on. No interesting places nearby yet, but I'm keeping an eye out as you move."
+            placeCount == 1 -> "Tour mode is on. There's 1 interesting place nearby. I'll tell you about it as you get close."
+            else -> "Tour mode is on. I found $placeCount interesting places nearby. I'll tell you about them as we go."
+        }
+    }
+
+    /**
+     * Spoken preview when a navigation route's corridor is registered.
+     * Null when the route has nothing to narrate — the navigation prompts
+     * are already talking, so don't add noise.
+     */
+    fun corridorAnnouncement(placeCount: Int): String? {
+        return when {
+            placeCount <= 0 -> null
+            placeCount == 1 -> "Your route passes 1 interesting place. I'll point it out on the way."
+            else -> "Your route passes $placeCount interesting places. I'll point them out on the way."
+        }
+    }
+
+    /**
      * Closing line spoken on arrival, summarizing the drive's tour.
      * Null when nothing was narrated — stay quiet rather than announce
      * an empty tour.

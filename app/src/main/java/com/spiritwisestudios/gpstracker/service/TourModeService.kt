@@ -182,8 +182,19 @@ class TourModeService : Service() {
 
                 // Fetch nearby places first
                 val currentLocation = locationAwarenessService.getCurrentLocation()
-                if (currentLocation != null) {
+                val initialPlaces = if (currentLocation != null) {
                     fetchAndRegisterNearbyPlaces(currentLocation)
+                } else {
+                    emptyList()
+                }
+
+                // Say hello: confirms audio works and sets expectations
+                // instead of silence until the first geofence fires
+                if (userPreferences.audioEnabled) {
+                    launch {
+                        audioService.speak(TourLogic.tourStartAnnouncement(initialPlaces.size))
+                            .collectLatest {}
+                    }
                 }
 
                 // Update service state
@@ -272,6 +283,13 @@ class TourModeService : Service() {
                 locationAwarenessService.unregisterAllPointsOfInterest()
                 registerPlaces(places)
 
+                // Preview the tour so the driver knows narration is coming
+                if (userPreferences.audioEnabled) {
+                    TourLogic.corridorAnnouncement(places.size)?.let { announcement ->
+                        launch { audioService.speak(announcement).collectLatest {} }
+                    }
+                }
+
                 updateNotification(
                     "Tour Mode Active",
                     "Watching ${places.size} interesting places along your route",
@@ -329,9 +347,10 @@ class TourModeService : Service() {
 
     /**
      * Fetch POIs around a location and register them for monitoring.
+     * Returns the places found (empty on failure).
      */
-    private suspend fun fetchAndRegisterNearbyPlaces(location: LatLng) {
-        try {
+    private suspend fun fetchAndRegisterNearbyPlaces(location: LatLng): List<PointOfInterest> {
+        return try {
             lastFetchCenter = location
             val places = placesRepository.getNearbyPlaces(location, DISCOVERY_RADIUS_METERS).first()
             Timber.d("Found ${places.size} nearby places")
@@ -340,8 +359,10 @@ class TourModeService : Service() {
             // past the platform limit of 100
             locationAwarenessService.unregisterAllPointsOfInterest()
             registerPlaces(places)
+            places
         } catch (e: Exception) {
             Timber.e(e, "Error fetching nearby places")
+            emptyList()
         }
     }
 

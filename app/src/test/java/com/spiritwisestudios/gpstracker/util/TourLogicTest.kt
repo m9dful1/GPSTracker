@@ -90,6 +90,31 @@ class TourLogicTest {
         assertEquals(1, TourLogic.contentPriorityFor(poi(category = "no-such-category"), prefs, 1))
     }
 
+    // --- tourStartAnnouncement / corridorAnnouncement ---
+
+    @Test
+    fun `tour start always says something, even with no places`() {
+        assertTrue(TourLogic.tourStartAnnouncement(0).isNotBlank())
+        assertTrue(TourLogic.tourStartAnnouncement(0).contains("keeping an eye out"))
+    }
+
+    @Test
+    fun `tour start counts the nearby places`() {
+        assertTrue(TourLogic.tourStartAnnouncement(1).contains("1 interesting place"))
+        assertTrue(TourLogic.tourStartAnnouncement(12).contains("12 interesting places"))
+    }
+
+    @Test
+    fun `empty corridor stays quiet`() {
+        assertEquals(null, TourLogic.corridorAnnouncement(0))
+    }
+
+    @Test
+    fun `corridor announcement counts the route's places`() {
+        assertTrue(TourLogic.corridorAnnouncement(1)!!.contains("1 interesting place"))
+        assertTrue(TourLogic.corridorAnnouncement(8)!!.contains("8 interesting places"))
+    }
+
     // --- tripSummaryPhrase ---
 
     @Test
