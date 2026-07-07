@@ -892,6 +892,7 @@ By implementing these fixes, the application should have more reliable navigatio
 - **Tappable fact card**: `Narration` carries the placeId; tapping the card opens the place details sheet for the spot being narrated.
 - **Fact-card playback controls**: pause/resume and skip buttons on the card reuse the notification's `ACTION_PLAY_PAUSE` / `ACTION_NEXT_POI` service intents — big touch targets reachable without opening the notification shade while driving.
 - **"Up next" on the fact card**: `ContentDeliveryQueue.peek()` → `ContentService.peekNextContent()` surfaces the next queued narration; the card shows "Up next: <place>" under the progress bar, updating live when new places queue mid-narration.
+- **Actionable error messages**: `ErrorMessages.friendlyMessage(error, whatFailed)` maps failure types to short instructions (API-key problems → Cloud Console, permission denials → app settings, timeouts → retry, offline → check connection); all six PlacesViewModel error paths use it, and raw exception text stays in the log. SocketTimeoutException is classified as a timeout, not "no connection", despite being an IOException.
 - **Wikipedia attribution and read-more link**: Wikipedia-sourced facts show "From Wikipedia — read the full article" on the card, opening the source article in the browser (also the CC BY-SA attribution). The URL rides `Narration.sourceUrl` from `content.metadata["sourceUrl"]` and survives the Room cache round-trip; template-fallback facts show no link.
 - **Category preferences actually persist**: the tour settings screen always had category checkboxes, but the repository dropped `preferredCategories` on write and served a hard-coded set on read, silently reverting every save. Now stored in DataStore (`preferred_categories` string set) with robust parsing: never-saved → defaults, unknown names skipped, deselecting everything respected. The priority boost in `TourLogic.contentPriorityFor` is finally user-controlled.
 - **Tour Journal**: a journal FAB opens `TourJournalBottomSheet`, listing every narrated place newest-first (name, category, visit time) with tap-through to the details sheet. Backed by the existing visited-places store; `PointOfInterest` now carries `visitedDate`, and re-saves preserve the original visit timestamp.
@@ -902,8 +903,7 @@ By implementing these fixes, the application should have more reliable navigatio
 
 ## Remaining TODOs
 
-- User-facing error messages: standardize and surface actionable messages for Directions/Places failures in UI.
-- UI/UX polish: accurate audio progress, cancel during route calculation, surface monitoring status (battery/speed).
+- UI/UX polish: cancel during route calculation, surface monitoring status (battery/speed).
 - Dependency updates: Places SDK 3.3.0 → 4.x (Autocomplete `TypeFilter` and `Place.Field.NAME` are deprecated), `LocationRequest.create()` → `LocationRequest.Builder` in MainActivity.
 - Production key hygiene: split SDK vs web-service API keys; proxy Directions/Places web calls through a backend.
 - Instrumented tests for MainActivity flows and TourModeService.

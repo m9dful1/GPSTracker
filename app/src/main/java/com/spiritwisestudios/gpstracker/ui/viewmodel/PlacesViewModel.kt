@@ -13,6 +13,7 @@ import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.domain.service.AudioService
 import com.spiritwisestudios.gpstracker.data.repository.TourContentRepository
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
+import com.spiritwisestudios.gpstracker.util.ErrorMessages
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.catch
@@ -21,8 +22,6 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import timber.log.Timber
-import java.io.IOException
-import java.util.concurrent.TimeoutException
 import javax.inject.Inject
 
 /**
@@ -92,26 +91,7 @@ class PlacesViewModel @Inject constructor(
             }
             .catch { e ->
                 Timber.e(e, "Error fetching nearby places: ${e.javaClass.simpleName} - ${e.message}")
-                
-                // Provide more user-friendly error messages based on exception type
-                val errorMessage = when (e) {
-                    is SecurityException -> {
-                        if (e.message?.contains("API key") == true || 
-                            e.message?.contains("authorization") == true) {
-                            "Places API authorization error. Please ensure the API key is properly configured in Google Cloud Console."
-                        } else if (e.message?.contains("Permission") == true || 
-                                e.message?.contains("permission") == true) {
-                            "Location permission needed. Please grant location permission to see nearby places."
-                        } else {
-                            "Security error: ${e.message}"
-                        }
-                    }
-                    is IOException -> "Network error. Please check your connection and try again."
-                    is TimeoutException -> "Request timed out. Please try again."
-                    else -> "Failed to load nearby places: ${e.message}"
-                }
-                
-                _error.value = errorMessage
+                _error.value = ErrorMessages.friendlyMessage(e, "load nearby places")
                 _isLoading.value = false
             }
             .launchIn(viewModelScope)
@@ -133,7 +113,7 @@ class PlacesViewModel @Inject constructor(
                 }
                 .onFailure { e ->
                     Timber.e(e, "Error fetching place details")
-                    _error.value = "Failed to load place details: ${e.message}"
+                    _error.value = ErrorMessages.friendlyMessage(e, "load place details")
                     _isLoading.value = false
                 }
         }
@@ -152,7 +132,7 @@ class PlacesViewModel @Inject constructor(
                 }
                 .onFailure { e ->
                     Timber.e(e, "Error saving visited place")
-                    _error.value = "Failed to save visited place: ${e.message}"
+                    _error.value = ErrorMessages.friendlyMessage(e, "save this place")
                 }
         }
     }
@@ -170,7 +150,7 @@ class PlacesViewModel @Inject constructor(
                 }
                 .onFailure { e ->
                     Timber.e(e, "Error saving user notes")
-                    _error.value = "Failed to save notes: ${e.message}"
+                    _error.value = ErrorMessages.friendlyMessage(e, "save your notes")
                 }
         }
     }
@@ -187,7 +167,7 @@ class PlacesViewModel @Inject constructor(
             _selectedPlaceContent.value = content
         } catch (e: Exception) {
             Timber.e(e, "Error loading content for place: ${place.name}")
-            _error.value = "Failed to load content: ${e.message}"
+            _error.value = ErrorMessages.friendlyMessage(e, "load the story for this place")
         }
     }
 
@@ -209,7 +189,7 @@ class PlacesViewModel @Inject constructor(
                 }
                 .catch { e ->
                     Timber.e(e, "Error generating content")
-                    _error.value = "Failed to generate content: ${e.message}"
+                    _error.value = ErrorMessages.friendlyMessage(e, "generate the story for this place")
                     _contentGenerationStatus.value = TourContentRepository.ContentGenerationResult.Error(e.message ?: "Unknown error")
                 }
                 .launchIn(viewModelScope)
