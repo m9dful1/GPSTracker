@@ -680,4 +680,12 @@ class LocationAwarenessServiceImpl @Inject constructor(
         }
         return currentSpeed
     }
-} 
+
+    /**
+     * Get the device's current direction of travel from the latest GPS fix.
+     * The fix only carries a bearing while actually moving.
+     */
+    override fun getCurrentHeading(): Float? {
+        return previousLocation?.takeIf { it.hasBearing() }?.bearing
+    }
+}

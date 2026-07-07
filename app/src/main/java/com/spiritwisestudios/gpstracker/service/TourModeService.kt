@@ -15,6 +15,7 @@ import com.google.android.gms.maps.model.LatLng
 import com.spiritwisestudios.gpstracker.MainActivity
 import com.spiritwisestudios.gpstracker.R
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
+import com.spiritwisestudios.gpstracker.domain.model.TourContent
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.domain.repository.PlacesRepository
 import com.spiritwisestudios.gpstracker.domain.service.AudioService
@@ -481,8 +482,9 @@ class TourModeService : Service() {
             val poi = placesRepository.getPlaceDetails(content.poiId).getOrNull()
             currentPoi = poi
 
-            // Speak the content
-            audioService.speak(content)
+            // Speak the content, introduced like a live tour guide
+            // ("On your left: Fort Point. ...")
+            audioService.speak(spokenNarrationFor(poi, content))
                 .collectLatest { status ->
                     when (status) {
                         AudioService.SpeakingStatus.COMPLETED -> {
@@ -502,6 +504,31 @@ class TourModeService : Service() {
         } catch (e: Exception) {
             Timber.e(e, "Error delivering content")
         }
+    }
+
+    /**
+     * Prefix the narration with where the place sits relative to the current
+     * direction of travel. The GPS heading is only meaningful while moving,
+     * so a stationary user gets a neutral introduction instead.
+     */
+    private suspend fun spokenNarrationFor(poi: PointOfInterest?, content: TourContent): String {
+        if (poi == null) return content.content
+
+        val heading = locationAwarenessService.getCurrentHeading()
+        val speed = locationAwarenessService.getCurrentSpeed() ?: 0f
+        val location = if (heading != null && speed >= TourLogic.MIN_HEADING_SPEED_MPS) {
+            locationAwarenessService.getCurrentLocation()
+        } else {
+            null
+        }
+
+        val direction = if (location != null && heading != null) {
+            TourLogic.relativeDirection(heading, GeoUtils.bearingDegrees(location, poi.latLng))
+        } else {
+            null
+        }
+
+        return "${TourLogic.narrationIntroFor(poi.name, direction)} ${content.content}"
     }
 
     /**

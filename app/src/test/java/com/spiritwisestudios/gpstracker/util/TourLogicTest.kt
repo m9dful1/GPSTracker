@@ -89,4 +89,64 @@ class TourLogicTest {
         val prefs = UserPreferences()
         assertEquals(1, TourLogic.contentPriorityFor(poi(category = "no-such-category"), prefs, 1))
     }
+
+    // --- relativeDirection ---
+
+    @Test
+    fun `poi on the nose is ahead`() {
+        assertEquals(TourLogic.RelativeDirection.AHEAD, TourLogic.relativeDirection(0f, 0f))
+    }
+
+    @Test
+    fun `poi at ninety degrees is on the right`() {
+        assertEquals(TourLogic.RelativeDirection.RIGHT, TourLogic.relativeDirection(0f, 90f))
+    }
+
+    @Test
+    fun `poi at one eighty is behind`() {
+        assertEquals(TourLogic.RelativeDirection.BEHIND, TourLogic.relativeDirection(0f, 180f))
+    }
+
+    @Test
+    fun `poi at two seventy is on the left`() {
+        assertEquals(TourLogic.RelativeDirection.LEFT, TourLogic.relativeDirection(0f, 270f))
+    }
+
+    @Test
+    fun `direction is relative to travel heading not north`() {
+        // Heading east, POI due north → over the left shoulder
+        assertEquals(TourLogic.RelativeDirection.LEFT, TourLogic.relativeDirection(90f, 0f))
+    }
+
+    @Test
+    fun `quadrant wraps around north`() {
+        // Heading 350°, POI bearing 10° → only 20° off the nose
+        assertEquals(TourLogic.RelativeDirection.AHEAD, TourLogic.relativeDirection(350f, 10f))
+    }
+
+    @Test
+    fun `quadrant boundaries fall clockwise`() {
+        assertEquals(TourLogic.RelativeDirection.RIGHT, TourLogic.relativeDirection(0f, 45f))
+        assertEquals(TourLogic.RelativeDirection.BEHIND, TourLogic.relativeDirection(0f, 135f))
+        assertEquals(TourLogic.RelativeDirection.LEFT, TourLogic.relativeDirection(0f, 225f))
+        assertEquals(TourLogic.RelativeDirection.AHEAD, TourLogic.relativeDirection(0f, 315f))
+    }
+
+    // --- narrationIntroFor ---
+
+    @Test
+    fun `intro names the direction`() {
+        assertEquals(
+            "On your left: Fort Point.",
+            TourLogic.narrationIntroFor("Fort Point", TourLogic.RelativeDirection.LEFT)
+        )
+    }
+
+    @Test
+    fun `unknown direction falls back to neutral intro`() {
+        assertEquals(
+            "Coming up: Fort Point.",
+            TourLogic.narrationIntroFor("Fort Point", null)
+        )
+    }
 }

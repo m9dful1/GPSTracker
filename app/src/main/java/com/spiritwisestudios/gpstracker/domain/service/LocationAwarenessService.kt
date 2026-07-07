@@ -81,7 +81,15 @@ interface LocationAwarenessService {
      * @return The current speed in meters per second, or null if unavailable
      */
     fun getCurrentSpeed(): Float?
-    
+
+    /**
+     * Get the device's current direction of travel.
+     *
+     * @return Bearing in degrees [0, 360) or null when unknown (e.g. stationary
+     * or no GPS fix with a bearing yet)
+     */
+    fun getCurrentHeading(): Float?
+
     /**
      * Calculate the distance to a point of interest from the current location.
      * 

@@ -9,6 +9,43 @@ import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
  */
 object TourLogic {
 
+    /** Minimum speed before a GPS bearing is steady enough to narrate from. */
+    const val MIN_HEADING_SPEED_MPS = 1.0f
+
+    /**
+     * Where a POI sits relative to the direction of travel.
+     */
+    enum class RelativeDirection { AHEAD, RIGHT, BEHIND, LEFT }
+
+    /**
+     * Classify a POI's bearing relative to the travel heading into the
+     * quadrant a tour guide would call out. Each quadrant is 90° wide,
+     * centered on the nose, right door, tail, and left door.
+     */
+    fun relativeDirection(travelHeading: Float, bearingToPoi: Float): RelativeDirection {
+        val delta = ((bearingToPoi - travelHeading) % 360f + 360f) % 360f
+        return when {
+            delta < 45f || delta >= 315f -> RelativeDirection.AHEAD
+            delta < 135f -> RelativeDirection.RIGHT
+            delta < 225f -> RelativeDirection.BEHIND
+            else -> RelativeDirection.LEFT
+        }
+    }
+
+    /**
+     * Spoken introduction for a POI narration. Falls back to a neutral
+     * phrase when the travel direction is unknown (e.g. stationary).
+     */
+    fun narrationIntroFor(poiName: String, direction: RelativeDirection?): String {
+        return when (direction) {
+            RelativeDirection.AHEAD -> "Just ahead: $poiName."
+            RelativeDirection.RIGHT -> "On your right: $poiName."
+            RelativeDirection.BEHIND -> "Just behind you: $poiName."
+            RelativeDirection.LEFT -> "On your left: $poiName."
+            null -> "Coming up: $poiName."
+        }
+    }
+
     /**
      * Calculate an appropriate geofence radius based on movement speed.
      * Faster speeds require larger geofences to provide timely notifications.

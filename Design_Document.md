@@ -883,6 +883,7 @@ By implementing these fixes, the application should have more reliable navigatio
 - **Collector leak fixed**: `PlacesViewModel.updateAudioSettings` no longer starts an endless preferences collector per call.
 - **Thread-safe content queue**: delivery queue extracted into `ContentDeliveryQueue` with synchronized access.
 - **Unit tests added** (50 tests): polyline decoding, geo math, route sampling, geofence radius, content priority, delivery queue ordering, Places/Wikipedia response parsing, detail-level trimming, TTS resume-position logic.
+- **Directional narration**: each narration opens with where the place sits relative to the direction of travel ("On your left: Fort Point."), like a live tour guide. `TourLogic.relativeDirection` classifies the POI bearing against the GPS heading (`LocationAwarenessService.getCurrentHeading`, trusted only above 1 m/s); a neutral "Coming up:" intro is used when stationary.
 
 ## Remaining TODOs
 
