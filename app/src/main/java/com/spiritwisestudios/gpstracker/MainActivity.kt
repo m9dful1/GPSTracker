@@ -1024,7 +1024,17 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             val announcementKey = "${instruction.maneuverPoint}|${instruction.type}|$announcementTiming"
             if (announcementKey != lastAnnouncementKey) {
                 lastAnnouncementKey = announcementKey
-                val voiceInstruction = formatInstructionForVoice(instruction, announcementTiming)
+                var voiceInstruction = formatInstructionForVoice(instruction, announcementTiming)
+
+                // On arrival, close the tour with a summary of the drive
+                // ("you heard about 7 places along the way"). Appended to the
+                // same utterance so it can't race the arrival prompt.
+                if (instruction.type == NavigationService.InstructionType.ARRIVE) {
+                    tourModeService?.consumeTripSummaryPhrase()?.let { summary ->
+                        voiceInstruction += " $summary"
+                    }
+                }
+
                 // Priority prompt: pauses tour narration and resumes it after
                 placesViewModel.speakNavigationPrompt(voiceInstruction)
             }

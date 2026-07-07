@@ -85,6 +85,10 @@ class TourModeService : Service() {
     private var lastFetchCenter: LatLng? = null
     private var routeCorridorActive = false
 
+    // Places narrated since the current route corridor began, for the
+    // arrival summary ("you heard about 7 places along the way")
+    private var tripNarrationCount = 0
+
     companion object {
         // Search this far around the user (or route samples) for POIs
         private const val DISCOVERY_RADIUS_METERS = 1500
@@ -255,6 +259,11 @@ class TourModeService : Service() {
 
         serviceScope.launch {
             try {
+                // A fresh corridor starts a new trip; reroutes of the same
+                // drive keep the running count
+                if (!routeCorridorActive) {
+                    tripNarrationCount = 0
+                }
                 routeCorridorActive = true
                 val places = placesRepository.getPlacesAlongRoute(route, DISCOVERY_RADIUS_METERS / 3)
                 Timber.d("Route corridor: found ${places.size} places along route")
@@ -280,6 +289,17 @@ class TourModeService : Service() {
     fun clearRouteCorridor() {
         routeCorridorActive = false
         lastFetchCenter = null // force a refresh around the current position
+    }
+
+    /**
+     * Return (and clear) the closing tour-summary line for this drive, or
+     * null when nothing was narrated. MainActivity appends it to the spoken
+     * arrival announcement so it rides the same utterance.
+     */
+    fun consumeTripSummaryPhrase(): String? {
+        val phrase = TourLogic.tripSummaryPhrase(tripNarrationCount)
+        tripNarrationCount = 0
+        return phrase
     }
 
     /**
@@ -521,6 +541,7 @@ class TourModeService : Service() {
                             // Remember this place was narrated so it isn't
                             // repeated on the next pass (or next drive)
                             poi?.let { placesRepository.saveVisitedPlace(it.copy(isVisited = true)) }
+                            tripNarrationCount++
 
                             // When complete, deliver the next content if available
                             deliverNextContent()

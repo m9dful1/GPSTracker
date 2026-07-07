@@ -891,6 +891,7 @@ By implementing these fixes, the application should have more reliable navigatio
 - **Corridor and polyline follow reroutes**: `NavigationStatus.routeVersion` increments on every route (re)calculation; MainActivity re-sends the tour corridor and redraws the route polyline whenever it changes (previously both were done once per session, so off-route recalculations left a stale polyline and a stale corridor).
 - **Tappable fact card**: `Narration` carries the placeId; tapping the card opens the place details sheet for the spot being narrated.
 - **Tour Journal**: a journal FAB opens `TourJournalBottomSheet`, listing every narrated place newest-first (name, category, visit time) with tap-through to the details sheet. Backed by the existing visited-places store; `PointOfInterest` now carries `visitedDate`, and re-saves preserve the original visit timestamp.
+- **Trip summary on arrival**: the guide closes the drive with "That concludes today's tour: you heard about N places along the way." `TourModeService` counts completed narrations per corridor (reroutes keep the count, a fresh corridor resets it) and `consumeTripSummaryPhrase()` hands the line to MainActivity, which appends it to the spoken arrival announcement so the two can't race in the TTS layer. Silent when nothing was narrated.
 
 ## Remaining TODOs
 

@@ -90,6 +90,26 @@ class TourLogicTest {
         assertEquals(1, TourLogic.contentPriorityFor(poi(category = "no-such-category"), prefs, 1))
     }
 
+    // --- tripSummaryPhrase ---
+
+    @Test
+    fun `no narrations means no summary`() {
+        assertEquals(null, TourLogic.tripSummaryPhrase(0))
+        assertEquals(null, TourLogic.tripSummaryPhrase(-1))
+    }
+
+    @Test
+    fun `single narration is phrased in the singular`() {
+        val phrase = TourLogic.tripSummaryPhrase(1)!!
+        assertTrue(phrase.contains("1 place "))
+    }
+
+    @Test
+    fun `multiple narrations are counted in the summary`() {
+        val phrase = TourLogic.tripSummaryPhrase(7)!!
+        assertTrue(phrase.contains("7 places"))
+    }
+
     // --- detailLevelFor ---
 
     @Test

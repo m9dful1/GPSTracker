@@ -47,6 +47,19 @@ object TourLogic {
     }
 
     /**
+     * Closing line spoken on arrival, summarizing the drive's tour.
+     * Null when nothing was narrated — stay quiet rather than announce
+     * an empty tour.
+     */
+    fun tripSummaryPhrase(narratedCount: Int): String? {
+        return when {
+            narratedCount <= 0 -> null
+            narratedCount == 1 -> "That concludes today's tour: you heard about 1 place along the way."
+            else -> "That concludes today's tour: you heard about $narratedCount places along the way."
+        }
+    }
+
+    /**
      * Cap the narration detail level by travel speed: fast travel leaves
      * less time per place (and more places per minute), so facts get
      * shorter. Never exceeds the user's preferred level.
