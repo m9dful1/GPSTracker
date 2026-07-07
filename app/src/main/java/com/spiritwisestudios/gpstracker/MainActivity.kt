@@ -831,23 +831,27 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
                 
                 // Start collecting navigation updates
                 lifecycleScope.launch {
-                    var corridorSent = false
+                    var corridorRouteVersion = -1
                     navigationService.startNavigation(destinationLatLng).collectLatest { status ->
                         // Also shows the next instruction when one is available
                         updateNavigationStatus(status, displayName)
 
-                        // Draw the route - moved this here to ensure route data is available
-                        drawRouteFromNavigationService()
-
-                        // Register the POIs along this route with tour mode so
-                        // narration follows the drive
-                        if (!corridorSent) {
+                        // On every new route (initial calculation or off-route
+                        // recalculation): clear the stale polyline so it is
+                        // redrawn, and re-register the tour corridor so
+                        // narration follows the *new* drive
+                        if (status.routeVersion != corridorRouteVersion) {
                             val route = navigationService.getCurrentRoute()
                             if (route.isNotEmpty()) {
+                                routePolyline?.remove()
+                                routePolyline = null
                                 tourModeService?.updateRouteCorridor(route)
-                                corridorSent = true
+                                corridorRouteVersion = status.routeVersion
                             }
                         }
+
+                        // Draw the route - moved this here to ensure route data is available
+                        drawRouteFromNavigationService()
 
                         // Update camera to follow user if in navigation mode
                         status.currentLocation.let { currentLocation ->

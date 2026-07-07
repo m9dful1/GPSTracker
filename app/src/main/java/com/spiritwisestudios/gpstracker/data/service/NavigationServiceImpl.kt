@@ -62,6 +62,10 @@ class NavigationServiceImpl @Inject constructor(
     private var locationCallback: LocationCallback? = null
     private var locationRequest: LocationRequest? = null
     private var lastRecalculationTimestampMs: Long = 0L
+
+    // Bumped whenever a route is (re)calculated; stamped onto every status
+    @Volatile
+    private var currentRouteVersion: Int = 0
     private val offRouteDistanceThresholdMeters: Float = 80f
     private val routeRecalculationCooldownMs: Long = 15_000L
     
@@ -108,6 +112,7 @@ class NavigationServiceImpl @Inject constructor(
                 
                 if (routeResult != null) {
                     // Update navigation state with calculated values and route
+                    currentRouteVersion++
                     navigationState.value = navigationState.value.copy(
                         currentRoute = routeResult.route,
                         distanceRemaining = routeResult.distance,
@@ -131,11 +136,13 @@ class NavigationServiceImpl @Inject constructor(
                             distanceRemaining = navigationState.value.distanceRemaining,
                             timeRemaining = routeResult.duration,
                             nextInstruction = navigationState.value.nextInstruction,
-                            announcementTiming = announcementTiming
+                            announcementTiming = announcementTiming,
+                            routeVersion = currentRouteVersion
                         )
                     )
                 } else {
                     // Fallback to straight-line calculation if API fails
+                    currentRouteVersion++
                     navigationState.value = navigationState.value.copy(
                         currentRoute = listOf(currentLatLng, destination),
                         distanceRemaining = initialDistance,
@@ -149,7 +156,8 @@ class NavigationServiceImpl @Inject constructor(
                             currentLocation = currentLatLng,
                             distanceRemaining = initialDistance,
                             timeRemaining = (initialDistance / 13.4f * 3600 * 1000).toLong(),
-                            nextInstruction = null
+                            nextInstruction = null,
+                            routeVersion = currentRouteVersion
                         )
                     )
                 }
@@ -271,6 +279,7 @@ class NavigationServiceImpl @Inject constructor(
                     serviceScope.launch {
                         val routeResult = getRouteFromDirectionsApi(newLocation, dest, currentState.waypoints)
                         if (routeResult != null) {
+                            currentRouteVersion++
                             navigationState.value = navigationState.value.copy(
                                 currentRoute = routeResult.route,
                                 distanceRemaining = routeResult.distance,
@@ -288,7 +297,8 @@ class NavigationServiceImpl @Inject constructor(
                                     distanceRemaining = routeResult.distance,
                                     timeRemaining = routeResult.duration,
                                     nextInstruction = navigationState.value.nextInstruction,
-                                    announcementTiming = timing
+                                    announcementTiming = timing,
+                                    routeVersion = currentRouteVersion
                                 )
                             )
                             return@launch
@@ -338,7 +348,8 @@ class NavigationServiceImpl @Inject constructor(
                 distanceRemaining = newDistanceToDestination,
                 timeRemaining = remainingTime,
                 nextInstruction = nextInstruction,
-                announcementTiming = announcementTiming
+                announcementTiming = announcementTiming,
+                routeVersion = currentRouteVersion
             )
         )
         
@@ -362,7 +373,8 @@ class NavigationServiceImpl @Inject constructor(
                     distanceRemaining = 0f,
                     timeRemaining = 0,
                     nextInstruction = arrivalInstruction,
-                    announcementTiming = NavigationService.AnnouncementTiming.IMMEDIATE
+                    announcementTiming = NavigationService.AnnouncementTiming.IMMEDIATE,
+                    routeVersion = currentRouteVersion
                 )
             )
         }

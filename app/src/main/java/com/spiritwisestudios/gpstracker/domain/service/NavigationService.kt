@@ -93,7 +93,13 @@ interface NavigationService {
         val distanceRemaining: Float,
         val timeRemaining: Long,
         val nextInstruction: NavigationInstruction?,
-        val announcementTiming: AnnouncementTiming = AnnouncementTiming.NONE
+        val announcementTiming: AnnouncementTiming = AnnouncementTiming.NONE,
+        /**
+         * Increments every time a route is (re)calculated, so consumers can
+         * react to reroutes: redraw the polyline, re-register the tour
+         * corridor, etc.
+         */
+        val routeVersion: Int = 0
     )
     
     /**
