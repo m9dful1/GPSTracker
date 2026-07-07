@@ -466,6 +466,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         binding.tvNarrationFact.text = narration.factText
         binding.tvNarrationFact.scrollTo(0, 0)
 
+        val upNext = narration.upNextTitle
+        binding.tvNarrationUpNext.text = upNext?.let { "Up next: $it" } ?: ""
+        binding.tvNarrationUpNext.visibility =
+            if (upNext.isNullOrBlank()) View.GONE else View.VISIBLE
+
         // Tapping the card opens the full details sheet for the narrated place
         binding.tvNarrationHint.visibility =
             if (narration.poiId == null) View.GONE else View.VISIBLE

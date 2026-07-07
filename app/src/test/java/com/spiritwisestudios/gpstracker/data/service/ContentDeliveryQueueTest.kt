@@ -53,4 +53,20 @@ class ContentDeliveryQueueTest {
         assertEquals(0, queue.size())
         assertNull(queue.poll())
     }
+
+    @Test
+    fun `peek shows the highest priority entry without removing it`() {
+        val queue = ContentDeliveryQueue()
+        queue.offer(content("low"), priority = 1)
+        queue.offer(content("high"), priority = 5)
+
+        assertEquals("high", queue.peek()?.title)
+        assertEquals(2, queue.size())
+        assertEquals("high", queue.poll()?.title)
+    }
+
+    @Test
+    fun `peek on empty queue returns null`() {
+        assertNull(ContentDeliveryQueue().peek())
+    }
 }

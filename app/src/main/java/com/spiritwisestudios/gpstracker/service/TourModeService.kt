@@ -525,6 +525,9 @@ class TourModeService : Service() {
             // If nothing is currently being spoken, start speaking
             if (!audioService.isSpeaking()) {
                 deliverNextContent()
+            } else {
+                // Mid-narration: surface the newly queued place as "up next"
+                _currentNarration.value = _currentNarration.value?.copy(upNextTitle = upNextTitle())
             }
         } catch (e: Exception) {
             Timber.e(e, "Error generating content for ${poi.name}")
@@ -550,7 +553,8 @@ class TourModeService : Service() {
                 poiId = poi?.placeId ?: content.poiId,
                 poiName = poi?.name ?: content.title,
                 category = poi?.category,
-                factText = content.content
+                factText = content.content,
+                upNextTitle = upNextTitle()
             )
 
             // Speak the content, introduced like a live tour guide
@@ -580,6 +584,14 @@ class TourModeService : Service() {
         } catch (e: Exception) {
             Timber.e(e, "Error delivering content")
         }
+    }
+
+    /**
+     * Display name of the next queued narration, if any. Content titles are
+     * stored as "About <place>"; the prefix reads poorly after "Up next:".
+     */
+    private fun upNextTitle(): String? {
+        return contentService.peekNextContent()?.title?.removePrefix("About ")
     }
 
     /**
@@ -815,7 +827,8 @@ class TourModeService : Service() {
         val poiId: String?,
         val poiName: String,
         val category: String?,
-        val factText: String
+        val factText: String,
+        val upNextTitle: String? = null
     )
 
     /**

@@ -25,6 +25,10 @@ class ContentDeliveryQueue {
         queue.poll()?.content
     }
 
+    fun peek(): TourContent? = synchronized(lock) {
+        queue.peek()?.content
+    }
+
     fun clear() = synchronized(lock) {
         queue.clear()
     }

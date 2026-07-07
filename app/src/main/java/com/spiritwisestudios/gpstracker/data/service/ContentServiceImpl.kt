@@ -118,6 +118,10 @@ class ContentServiceImpl(
         return deliveryQueue.poll()
     }
 
+    override fun peekNextContent(): TourContent? {
+        return deliveryQueue.peek()
+    }
+
     override fun clearContentQueue() {
         deliveryQueue.clear()
         Timber.d("Content queue cleared")

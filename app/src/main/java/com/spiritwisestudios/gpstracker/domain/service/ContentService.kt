@@ -61,7 +61,14 @@ interface ContentService {
      * @return The next tour content or null if queue is empty
      */
     suspend fun getNextContent(): TourContent?
-    
+
+    /**
+     * Look at the next queued content without removing it.
+     *
+     * @return The next tour content or null if queue is empty
+     */
+    fun peekNextContent(): TourContent?
+
     /**
      * Clear the content delivery queue.
      */
