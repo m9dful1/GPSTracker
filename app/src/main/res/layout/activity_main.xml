@@ -202,6 +202,15 @@
                     android:maxHeight="160dp"
                     android:scrollbars="vertical"
                     android:textAppearance="?attr/textAppearanceBody2" />
+
+                <TextView
+                    android:id="@+id/tv_narration_hint"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end"
+                    android:layout_marginTop="4dp"
+                    android:text="Tap for details"
+                    android:textAppearance="?attr/textAppearanceCaption" />
             </LinearLayout>
         </androidx.cardview.widget.CardView>
 

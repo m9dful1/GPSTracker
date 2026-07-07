@@ -887,12 +887,14 @@ By implementing these fixes, the application should have more reliable navigatio
 - **Fact card during narration**: `TourModeService` exposes the narration in flight as `currentNarration: StateFlow<Narration?>`; MainActivity slides up a card with the place name, category, and the full fact text (scrollable) while audio plays, and hides it when the delivery queue drains. Stacks above the navigation status card so both fit during navigation.
 - **Speed-adaptive narration length**: `TourLogic.detailLevelFor` caps the content detail level by travel speed — full detail on foot (<15 km/h), medium while driving, brief at highway speed (≥80 km/h) — never exceeding the user's preferred level. Applied per delivery in `TourModeService`; safe because Room caches the untrimmed text and trimming happens at serve time.
 - **The tour guide remembers**: narrated places are saved as visited (`saveVisitedPlace` on narration completion), discovery overlays stored visited state onto fresh API results (`PlacesRepositoryImpl.mergeVisitedState` — API results always arrive with `isVisited = false`), and `generateAndQueueContent` skips visited places so the guide never repeats itself across passes or sessions. Manual replay is still available from the place details sheet, and the pre-existing visited priority penalty now actually fires.
+- **Category-styled markers**: `MarkerStyling` (pure, unit-tested) maps each category to a distinct marker hue and fades already-narrated places to 45% alpha.
+- **Corridor and polyline follow reroutes**: `NavigationStatus.routeVersion` increments on every route (re)calculation; MainActivity re-sends the tour corridor and redraws the route polyline whenever it changes (previously both were done once per session, so off-route recalculations left a stale polyline and a stale corridor).
+- **Tappable fact card**: `Narration` carries the placeId; tapping the card opens the place details sheet for the spot being narrated.
 
 ## Remaining TODOs
 
-- Route corridor refresh after re-routing: the corridor is registered once per navigation session; re-register when `NavigationServiceImpl` recalculates after an off-route detection (e.g., expose a route-version flag in `NavigationStatus`).
 - User-facing error messages: standardize and surface actionable messages for Directions/Places failures in UI.
-- UI/UX polish: accurate audio progress, cancel during route calculation, surface monitoring status (battery/speed), category-styled POI markers.
+- UI/UX polish: accurate audio progress, cancel during route calculation, surface monitoring status (battery/speed).
 - Dependency updates: Places SDK 3.3.0 → 4.x (Autocomplete `TypeFilter` and `Place.Field.NAME` are deprecated), `LocationRequest.create()` → `LocationRequest.Builder` in MainActivity.
 - Production key hygiene: split SDK vs web-service API keys; proxy Directions/Places web calls through a backend.
 - Instrumented tests for MainActivity flows and TourModeService.

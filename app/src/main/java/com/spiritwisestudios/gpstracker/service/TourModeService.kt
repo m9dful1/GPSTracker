@@ -506,6 +506,7 @@ class TourModeService : Service() {
             currentPoi = poi
 
             _currentNarration.value = Narration(
+                poiId = poi?.placeId ?: content.poiId,
                 poiName = poi?.name ?: content.title,
                 category = poi?.category,
                 factText = content.content
@@ -769,6 +770,7 @@ class TourModeService : Service() {
      * fact card alongside the audio.
      */
     data class Narration(
+        val poiId: String?,
         val poiName: String,
         val category: String?,
         val factText: String

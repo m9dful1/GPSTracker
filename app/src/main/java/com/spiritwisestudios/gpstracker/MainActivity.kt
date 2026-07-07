@@ -435,6 +435,16 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         binding.tvNarrationFact.text = narration.factText
         binding.tvNarrationFact.scrollTo(0, 0)
 
+        // Tapping the card opens the full details sheet for the narrated place
+        binding.tvNarrationHint.visibility =
+            if (narration.poiId == null) View.GONE else View.VISIBLE
+        card.setOnClickListener {
+            narration.poiId?.let { poiId ->
+                placesViewModel.selectPlace(poiId)
+                showPlaceDetailsBottomSheet()
+            }
+        }
+
         if (card.visibility != View.VISIBLE) {
             card.alpha = 0f
             card.translationY = 48f * resources.displayMetrics.density
