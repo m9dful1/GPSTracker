@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
@@ -41,6 +42,33 @@ class UserPreferencesRepository @Inject constructor(
         val PREFETCH_CONTENT = booleanPreferencesKey("prefetch_content")
         val USE_MOBILE_DATA = booleanPreferencesKey("use_mobile_data")
         val DARK_MODE_ENABLED = booleanPreferencesKey("dark_mode_enabled")
+        val PREFERRED_CATEGORIES = stringSetPreferencesKey("preferred_categories")
+    }
+
+    companion object {
+        /** Categories boosted until the user picks their own. */
+        val DEFAULT_PREFERRED_CATEGORIES: Set<PointOfInterest.Category> = setOf(
+            PointOfInterest.Category.HISTORICAL,
+            PointOfInterest.Category.CULTURAL,
+            PointOfInterest.Category.ARCHITECTURAL
+        )
+
+        /**
+         * Map stored category names back to the enum. Null means the user
+         * never saved a choice → defaults. Unknown names (e.g. from a
+         * newer/older app version) are skipped, and an empty set is
+         * respected as "no preferred categories".
+         */
+        internal fun parseCategories(names: Set<String>?): Set<PointOfInterest.Category> {
+            if (names == null) return DEFAULT_PREFERRED_CATEGORIES
+            return names.mapNotNull { name ->
+                try {
+                    PointOfInterest.Category.valueOf(name)
+                } catch (e: IllegalArgumentException) {
+                    null
+                }
+            }.toSet()
+        }
     }
 
     /**
@@ -55,12 +83,7 @@ class UserPreferencesRepository @Inject constructor(
                 voicePitch = preferences[PreferencesKeys.VOICE_PITCH] ?: 1.0f,
                 voiceLanguage = preferences[PreferencesKeys.VOICE_LANGUAGE] ?: "en-US",
                 autoPlayContent = preferences[PreferencesKeys.AUTO_PLAY_CONTENT] ?: true,
-                // For simplicity, we're not storing the preferred categories in preferences yet
-                preferredCategories = setOf(
-                    PointOfInterest.Category.HISTORICAL,
-                    PointOfInterest.Category.CULTURAL,
-                    PointOfInterest.Category.ARCHITECTURAL
-                ),
+                preferredCategories = parseCategories(preferences[PreferencesKeys.PREFERRED_CATEGORIES]),
                 contentDetailLevel = preferences[PreferencesKeys.CONTENT_DETAIL_LEVEL]?.let {
                     UserPreferences.DetailLevel.valueOf(it)
                 } ?: UserPreferences.DetailLevel.MEDIUM,
@@ -88,6 +111,8 @@ class UserPreferencesRepository @Inject constructor(
             preferences[PreferencesKeys.PREFETCH_CONTENT] = userPreferences.prefetchContent
             preferences[PreferencesKeys.USE_MOBILE_DATA] = userPreferences.useMobileData
             preferences[PreferencesKeys.DARK_MODE_ENABLED] = userPreferences.darkModeEnabled
+            preferences[PreferencesKeys.PREFERRED_CATEGORIES] =
+                userPreferences.preferredCategories.map { it.name }.toSet()
         }
     }
 
