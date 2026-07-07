@@ -454,6 +454,14 @@ class TourModeService : Service() {
      * Generate and queue content for a point of interest.
      */
     private suspend fun generateAndQueueContent(poi: PointOfInterest, priority: Int = 0) {
+        // A tour guide shouldn't repeat itself: places already narrated (or
+        // manually marked visited) aren't auto-queued again. They can still
+        // be played on demand from the place details sheet.
+        if (poi.isVisited) {
+            Timber.d("Skipping ${poi.name}: already narrated/visited")
+            return
+        }
+
         try {
             // Set as current POI
             currentPoi = poi
@@ -509,6 +517,10 @@ class TourModeService : Service() {
                 .collectLatest { status ->
                     when (status) {
                         AudioService.SpeakingStatus.COMPLETED -> {
+                            // Remember this place was narrated so it isn't
+                            // repeated on the next pass (or next drive)
+                            poi?.let { placesRepository.saveVisitedPlace(it.copy(isVisited = true)) }
+
                             // When complete, deliver the next content if available
                             deliverNextContent()
                         }

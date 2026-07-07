@@ -12,6 +12,9 @@ interface PointOfInterestDao {
     
     @Query("SELECT * FROM points_of_interest WHERE is_visited = 1")
     fun getVisitedPlaces(): Flow<List<PointOfInterestEntity>>
+
+    @Query("SELECT id FROM points_of_interest WHERE is_visited = 1")
+    suspend fun getVisitedPlaceIds(): List<String>
     
     @Query("SELECT * FROM points_of_interest WHERE id = :id")
     suspend fun getPointOfInterestById(id: String): PointOfInterestEntity?

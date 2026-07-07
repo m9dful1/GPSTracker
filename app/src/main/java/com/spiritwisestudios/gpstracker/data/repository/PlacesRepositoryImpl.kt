@@ -28,6 +28,24 @@ class PlacesRepositoryImpl @Inject constructor(
         // per route, spacing samples at least 2x the search radius apart.
         private const val MAX_ROUTE_SAMPLES = 15
         private const val MAX_ROUTE_POIS = 60
+
+        /**
+         * Overlay locally-stored visited state onto fresh API results, which
+         * always arrive with isVisited = false.
+         */
+        internal fun mergeVisitedState(
+            pois: List<PointOfInterest>,
+            visitedIds: Set<String>
+        ): List<PointOfInterest> {
+            if (visitedIds.isEmpty()) return pois
+            return pois.map { poi ->
+                if (poi.id in visitedIds || poi.placeId in visitedIds) {
+                    poi.copy(isVisited = true)
+                } else {
+                    poi
+                }
+            }
+        }
     }
 
     /**
@@ -37,7 +55,7 @@ class PlacesRepositoryImpl @Inject constructor(
         try {
             val places = placesApiService.getNearbyPlaces(center, radius)
             Timber.d("Successfully fetched ${places.size} nearby places")
-            emit(places)
+            emit(mergeVisitedState(places, pointOfInterestDao.getVisitedPlaceIds().toSet()))
         } catch (e: Exception) {
             when (e) {
                 is SecurityException -> {
@@ -84,7 +102,7 @@ class PlacesRepositoryImpl @Inject constructor(
         }
 
         Timber.d("Found ${pois.size} places along route (${samples.size} samples)")
-        return pois
+        return mergeVisitedState(pois, pointOfInterestDao.getVisitedPlaceIds().toSet())
     }
 
     /**
