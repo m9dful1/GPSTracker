@@ -90,6 +90,59 @@ class TourLogicTest {
         assertEquals(1, TourLogic.contentPriorityFor(poi(category = "no-such-category"), prefs, 1))
     }
 
+    // --- detailLevelFor ---
+
+    @Test
+    fun `stationary user keeps preferred detail level`() {
+        assertEquals(
+            UserPreferences.DetailLevel.DETAILED,
+            TourLogic.detailLevelFor(0f, UserPreferences.DetailLevel.DETAILED)
+        )
+    }
+
+    @Test
+    fun `walking keeps full detail`() {
+        // 2 m/s = 7.2 km/h
+        assertEquals(
+            UserPreferences.DetailLevel.DETAILED,
+            TourLogic.detailLevelFor(2f, UserPreferences.DetailLevel.DETAILED)
+        )
+    }
+
+    @Test
+    fun `city driving caps detailed down to medium`() {
+        // 10 m/s = 36 km/h
+        assertEquals(
+            UserPreferences.DetailLevel.MEDIUM,
+            TourLogic.detailLevelFor(10f, UserPreferences.DetailLevel.DETAILED)
+        )
+    }
+
+    @Test
+    fun `highway speed caps everything to brief`() {
+        // 25 m/s = 90 km/h
+        assertEquals(
+            UserPreferences.DetailLevel.BRIEF,
+            TourLogic.detailLevelFor(25f, UserPreferences.DetailLevel.DETAILED)
+        )
+        assertEquals(
+            UserPreferences.DetailLevel.BRIEF,
+            TourLogic.detailLevelFor(25f, UserPreferences.DetailLevel.MEDIUM)
+        )
+    }
+
+    @Test
+    fun `speed never raises detail above the user preference`() {
+        assertEquals(
+            UserPreferences.DetailLevel.BRIEF,
+            TourLogic.detailLevelFor(0f, UserPreferences.DetailLevel.BRIEF)
+        )
+        assertEquals(
+            UserPreferences.DetailLevel.MEDIUM,
+            TourLogic.detailLevelFor(2f, UserPreferences.DetailLevel.MEDIUM)
+        )
+    }
+
     // --- relativeDirection ---
 
     @Test

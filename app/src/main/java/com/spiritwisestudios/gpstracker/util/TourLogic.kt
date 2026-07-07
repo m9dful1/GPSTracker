@@ -47,6 +47,25 @@ object TourLogic {
     }
 
     /**
+     * Cap the narration detail level by travel speed: fast travel leaves
+     * less time per place (and more places per minute), so facts get
+     * shorter. Never exceeds the user's preferred level.
+     */
+    fun detailLevelFor(
+        speedMetersPerSecond: Float,
+        preferred: UserPreferences.DetailLevel
+    ): UserPreferences.DetailLevel {
+        val speedKmh = speedMetersPerSecond * 3.6f
+        val speedCap = when {
+            speedKmh < 15.0f -> UserPreferences.DetailLevel.DETAILED // on foot or cycling
+            speedKmh < 80.0f -> UserPreferences.DetailLevel.MEDIUM   // city driving
+            else -> UserPreferences.DetailLevel.BRIEF                 // highway
+        }
+        // Enum order is BRIEF < MEDIUM < DETAILED, so min() picks the shorter
+        return minOf(preferred, speedCap)
+    }
+
+    /**
      * Calculate an appropriate geofence radius based on movement speed.
      * Faster speeds require larger geofences to provide timely notifications.
      */

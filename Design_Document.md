@@ -885,6 +885,7 @@ By implementing these fixes, the application should have more reliable navigatio
 - **Unit tests added** (50 tests): polyline decoding, geo math, route sampling, geofence radius, content priority, delivery queue ordering, Places/Wikipedia response parsing, detail-level trimming, TTS resume-position logic.
 - **Directional narration**: each narration opens with where the place sits relative to the direction of travel ("On your left: Fort Point."), like a live tour guide. `TourLogic.relativeDirection` classifies the POI bearing against the GPS heading (`LocationAwarenessService.getCurrentHeading`, trusted only above 1 m/s); a neutral "Coming up:" intro is used when stationary.
 - **Fact card during narration**: `TourModeService` exposes the narration in flight as `currentNarration: StateFlow<Narration?>`; MainActivity slides up a card with the place name, category, and the full fact text (scrollable) while audio plays, and hides it when the delivery queue drains. Stacks above the navigation status card so both fit during navigation.
+- **Speed-adaptive narration length**: `TourLogic.detailLevelFor` caps the content detail level by travel speed — full detail on foot (<15 km/h), medium while driving, brief at highway speed (≥80 km/h) — never exceeding the user's preferred level. Applied per delivery in `TourModeService`; safe because Room caches the untrimmed text and trimming happens at serve time.
 
 ## Remaining TODOs
 

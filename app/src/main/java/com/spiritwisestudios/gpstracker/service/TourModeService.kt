@@ -458,8 +458,14 @@ class TourModeService : Service() {
             // Set as current POI
             currentPoi = poi
 
+            // Shorten facts at speed: driving past leaves less time per place
+            val speed = locationAwarenessService.getCurrentSpeed() ?: 0f
+            val effectivePreferences = userPreferences.copy(
+                contentDetailLevel = TourLogic.detailLevelFor(speed, userPreferences.contentDetailLevel)
+            )
+
             // Get or generate content
-            val content = contentService.getContentForPlace(poi, userPreferences)
+            val content = contentService.getContentForPlace(poi, effectivePreferences)
 
             // Calculate content priority (user prefs, rating, alert proximity)
             val calculatedPriority = TourLogic.contentPriorityFor(poi, userPreferences, priority)
