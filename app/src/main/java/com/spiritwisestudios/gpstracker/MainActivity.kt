@@ -305,7 +305,20 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         btnTourSettings.setOnClickListener {
             showTourSettings()
         }
-        
+
+        // Fact-card playback controls: same actions the notification uses,
+        // but reachable without opening the shade while driving
+        binding.btnNarrationPlayPause.setOnClickListener {
+            startService(Intent(this, TourModeService::class.java).apply {
+                action = AppConstants.ACTION_PLAY_PAUSE
+            })
+        }
+        binding.btnNarrationSkip.setOnClickListener {
+            startService(Intent(this, TourModeService::class.java).apply {
+                action = AppConstants.ACTION_NEXT_POI
+            })
+        }
+
         // Set up click listener for the navigation FAB
         fabNavigation.setOnClickListener {
             if (isNavigating) {
