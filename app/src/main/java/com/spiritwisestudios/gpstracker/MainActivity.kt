@@ -5,6 +5,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.res.Configuration
+import android.content.res.Resources
 import android.net.Uri
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
@@ -37,6 +39,7 @@ import com.google.android.gms.maps.model.Circle
 import com.google.android.gms.maps.model.CircleOptions
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
+import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.android.gms.maps.model.Marker
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.gms.maps.model.PolylineOptions
@@ -635,6 +638,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             ?.getInsets(WindowInsetsCompat.Type.systemBars())
             ?.let { bars -> mMap.setPadding(0, bars.top, 0, bars.bottom) }
 
+        // The map ignores the app's DayNight theme; style it dark ourselves
+        // so night drives aren't a full-screen white blast
+        applyMapNightStyleIfNeeded()
+
         // Stop following the user when they pan/zoom manually (Google Maps
         // behavior); the recenter FAB turns following back on.
         mMap.setOnCameraMoveStartedListener { reason ->
@@ -671,6 +678,28 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
 
         placesViewModel.fetchNearbyPlaces(center = point, radius = SCOUT_RADIUS_METERS)
         Toast.makeText(this, "Scouting this area for interesting places…", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * Apply the dark map style when the system is in night mode. The rest
+     * of the UI already follows the DayNight theme; the map needs explicit
+     * styling. Only affects the NORMAL map type — satellite and terrain
+     * render their own imagery.
+     */
+    private fun applyMapNightStyleIfNeeded() {
+        val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        if (nightMode != Configuration.UI_MODE_NIGHT_YES) return
+
+        try {
+            val applied = mMap.setMapStyle(
+                MapStyleOptions.loadRawResourceStyle(this, R.raw.map_style_night)
+            )
+            if (!applied) {
+                Timber.w("Night map style failed to parse")
+            }
+        } catch (e: Resources.NotFoundException) {
+            Timber.e(e, "Night map style resource missing")
+        }
     }
 
     // Request location permission and start location updates if permission is granted
