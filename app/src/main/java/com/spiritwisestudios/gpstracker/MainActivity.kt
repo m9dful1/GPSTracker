@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Bundle
 import android.os.IBinder
+import android.text.method.ScrollingMovementMethod
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
@@ -370,6 +371,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     }
     
     private fun observeTourModeServiceState() {
+        // Show a fact card while a POI is being narrated
+        lifecycleScope.launch {
+            tourModeService?.currentNarration?.collectLatest { narration ->
+                showNarrationCard(narration)
+            }
+        }
+
         // Observe the tour mode service state using lifecycleScope
         lifecycleScope.launch {
             tourModeService?.serviceState?.collectLatest { state ->
@@ -396,6 +404,44 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         }
     }
     
+    /**
+     * Slide the fact card up while narration plays and slide it away when
+     * the narration (and queue) finishes.
+     */
+    private fun showNarrationCard(narration: TourModeService.Narration?) {
+        val card = binding.narrationCard
+
+        if (narration == null) {
+            if (card.visibility == View.VISIBLE) {
+                card.animate()
+                    .translationY(card.height.toFloat())
+                    .alpha(0f)
+                    .setDuration(200)
+                    .withEndAction {
+                        card.visibility = View.GONE
+                        card.translationY = 0f
+                        card.alpha = 1f
+                    }
+            }
+            return
+        }
+
+        binding.tvNarrationTitle.text = narration.poiName
+        binding.tvNarrationCategory.text = narration.category ?: ""
+        binding.tvNarrationCategory.visibility =
+            if (narration.category.isNullOrEmpty()) View.GONE else View.VISIBLE
+        binding.tvNarrationFact.movementMethod = ScrollingMovementMethod()
+        binding.tvNarrationFact.text = narration.factText
+        binding.tvNarrationFact.scrollTo(0, 0)
+
+        if (card.visibility != View.VISIBLE) {
+            card.alpha = 0f
+            card.translationY = 48f * resources.displayMetrics.density
+            card.visibility = View.VISIBLE
+            card.animate().translationY(0f).alpha(1f).setDuration(250)
+        }
+    }
+
     private fun updateTourModeUI(isActive: Boolean) {
         if (isActive) {
             tourModeStatusCard.visibility = View.VISIBLE

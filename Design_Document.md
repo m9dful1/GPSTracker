@@ -884,12 +884,13 @@ By implementing these fixes, the application should have more reliable navigatio
 - **Thread-safe content queue**: delivery queue extracted into `ContentDeliveryQueue` with synchronized access.
 - **Unit tests added** (50 tests): polyline decoding, geo math, route sampling, geofence radius, content priority, delivery queue ordering, Places/Wikipedia response parsing, detail-level trimming, TTS resume-position logic.
 - **Directional narration**: each narration opens with where the place sits relative to the direction of travel ("On your left: Fort Point."), like a live tour guide. `TourLogic.relativeDirection` classifies the POI bearing against the GPS heading (`LocationAwarenessService.getCurrentHeading`, trusted only above 1 m/s); a neutral "Coming up:" intro is used when stationary.
+- **Fact card during narration**: `TourModeService` exposes the narration in flight as `currentNarration: StateFlow<Narration?>`; MainActivity slides up a card with the place name, category, and the full fact text (scrollable) while audio plays, and hides it when the delivery queue drains. Stacks above the navigation status card so both fit during navigation.
 
 ## Remaining TODOs
 
 - Route corridor refresh after re-routing: the corridor is registered once per navigation session; re-register when `NavigationServiceImpl` recalculates after an off-route detection (e.g., expose a route-version flag in `NavigationStatus`).
 - User-facing error messages: standardize and surface actionable messages for Directions/Places failures in UI.
-- UI/UX polish: accurate audio progress, cancel during route calculation, surface monitoring status (battery/speed), category-styled POI markers, a "fact card" that slides up as narration plays.
+- UI/UX polish: accurate audio progress, cancel during route calculation, surface monitoring status (battery/speed), category-styled POI markers.
 - Dependency updates: Places SDK 3.3.0 → 4.x (Autocomplete `TypeFilter` and `Place.Field.NAME` are deprecated), `LocationRequest.create()` → `LocationRequest.Builder` in MainActivity.
 - Production key hygiene: split SDK vs web-service API keys; proxy Directions/Places web calls through a backend.
 - Instrumented tests for MainActivity flows and TourModeService.

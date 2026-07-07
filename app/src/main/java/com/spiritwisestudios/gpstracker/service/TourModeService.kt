@@ -70,6 +70,10 @@ class TourModeService : Service() {
     private val _serviceState = MutableStateFlow<TourModeState>(TourModeState.Inactive)
     val serviceState: StateFlow<TourModeState> = _serviceState
 
+    // Narration currently being spoken, so the UI can show a fact card
+    private val _currentNarration = MutableStateFlow<Narration?>(null)
+    val currentNarration: StateFlow<Narration?> = _currentNarration
+
     // Current user preferences
     private var userPreferences: UserPreferences = UserPreferences()
 
@@ -229,6 +233,7 @@ class TourModeService : Service() {
 
         // Stop audio playback
         audioService.stop()
+        _currentNarration.value = null
 
         // Clear content queue
         contentService.clearContentQueue()
@@ -476,11 +481,21 @@ class TourModeService : Service() {
      */
     private suspend fun deliverNextContent() {
         try {
-            val content = contentService.getNextContent() ?: return
+            val content = contentService.getNextContent()
+            if (content == null) {
+                _currentNarration.value = null
+                return
+            }
 
             // Set as current POI
             val poi = placesRepository.getPlaceDetails(content.poiId).getOrNull()
             currentPoi = poi
+
+            _currentNarration.value = Narration(
+                poiName = poi?.name ?: content.title,
+                category = poi?.category,
+                factText = content.content
+            )
 
             // Speak the content, introduced like a live tour guide
             // ("On your left: Fort Point. ...")
@@ -730,6 +745,16 @@ class TourModeService : Service() {
     inner class TourModeServiceBinder : Binder() {
         fun getService(): TourModeService = this@TourModeService
     }
+
+    /**
+     * The narration currently being spoken, exposed so the UI can show a
+     * fact card alongside the audio.
+     */
+    data class Narration(
+        val poiName: String,
+        val category: String?,
+        val factText: String
+    )
 
     /**
      * States for the tour mode service.
