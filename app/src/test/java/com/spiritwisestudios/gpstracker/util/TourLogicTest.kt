@@ -90,6 +90,20 @@ class TourLogicTest {
         assertEquals(1, TourLogic.contentPriorityFor(poi(category = "no-such-category"), prefs, 1))
     }
 
+    // --- shouldPrefetchContent ---
+
+    @Test
+    fun `prefetch waits for wifi when mobile data is off`() {
+        assertTrue(TourLogic.shouldPrefetchContent(allowMobileData = false, onUnmeteredNetwork = true))
+        assertTrue(!TourLogic.shouldPrefetchContent(allowMobileData = false, onUnmeteredNetwork = false))
+    }
+
+    @Test
+    fun `opting into mobile data allows prefetch anywhere`() {
+        assertTrue(TourLogic.shouldPrefetchContent(allowMobileData = true, onUnmeteredNetwork = false))
+        assertTrue(TourLogic.shouldPrefetchContent(allowMobileData = true, onUnmeteredNetwork = true))
+    }
+
     // --- tourStartAnnouncement / corridorAnnouncement ---
 
     @Test

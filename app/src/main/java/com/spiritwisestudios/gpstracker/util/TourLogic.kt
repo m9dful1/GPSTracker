@@ -47,6 +47,15 @@ object TourLogic {
     }
 
     /**
+     * Whether bulk content prefetching is allowed right now. On-demand
+     * narration fetches are always allowed — this only gates the
+     * speculative batch downloads, which are the data-hungry part.
+     */
+    fun shouldPrefetchContent(allowMobileData: Boolean, onUnmeteredNetwork: Boolean): Boolean {
+        return allowMobileData || onUnmeteredNetwork
+    }
+
+    /**
      * Spoken confirmation when tour mode starts, so the user hears that
      * audio works and knows what to expect instead of getting silence
      * until the first geofence fires.

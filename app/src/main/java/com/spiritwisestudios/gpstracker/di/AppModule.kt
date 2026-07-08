@@ -15,7 +15,9 @@ import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepositor
 import com.spiritwisestudios.gpstracker.data.service.ContentServiceImpl
 import com.spiritwisestudios.gpstracker.data.service.LocationAwarenessServiceImpl
 import com.spiritwisestudios.gpstracker.data.service.NavigationServiceImpl
+import android.net.ConnectivityManager
 import com.spiritwisestudios.gpstracker.domain.repository.PlacesRepository
+import com.spiritwisestudios.gpstracker.domain.service.ConnectivityChecker
 import com.spiritwisestudios.gpstracker.domain.service.ContentService
 import com.spiritwisestudios.gpstracker.domain.service.LocationAwarenessService
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
@@ -102,11 +104,22 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideConnectivityChecker(
+        @ApplicationContext context: Context
+    ): ConnectivityChecker {
+        val connectivityManager =
+            context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        return ConnectivityChecker { !connectivityManager.isActiveNetworkMetered }
+    }
+
+    @Provides
+    @Singleton
     fun provideContentService(
         wikipediaApiService: WikipediaApiService,
-        tourContentDao: TourContentDao
+        tourContentDao: TourContentDao,
+        connectivityChecker: ConnectivityChecker
     ): ContentService {
-        return ContentServiceImpl(wikipediaApiService, tourContentDao)
+        return ContentServiceImpl(wikipediaApiService, tourContentDao, connectivityChecker)
     }
 
     @Provides

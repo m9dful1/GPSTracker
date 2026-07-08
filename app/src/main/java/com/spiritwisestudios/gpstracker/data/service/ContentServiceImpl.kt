@@ -6,7 +6,9 @@ import com.spiritwisestudios.gpstracker.data.db.entity.TourContentEntity
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.TourContent
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
+import com.spiritwisestudios.gpstracker.domain.service.ConnectivityChecker
 import com.spiritwisestudios.gpstracker.domain.service.ContentService
+import com.spiritwisestudios.gpstracker.util.TourLogic
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import timber.log.Timber
@@ -19,7 +21,8 @@ import java.util.UUID
  */
 class ContentServiceImpl(
     private val wikipediaApiService: WikipediaApiService,
-    private val tourContentDao: TourContentDao
+    private val tourContentDao: TourContentDao,
+    private val connectivityChecker: ConnectivityChecker
 ) : ContentService {
 
     private val deliveryQueue = ContentDeliveryQueue()
@@ -97,6 +100,18 @@ class ContentServiceImpl(
         pointsOfInterest: List<PointOfInterest>,
         userPreferences: UserPreferences
     ) {
+        // Honor the "use mobile data" setting: speculative batch downloads
+        // wait for Wi-Fi unless the user opted in. On-demand narration
+        // fetches are unaffected.
+        if (!TourLogic.shouldPrefetchContent(
+                allowMobileData = userPreferences.useMobileData,
+                onUnmeteredNetwork = connectivityChecker.isOnUnmeteredNetwork()
+            )
+        ) {
+            Timber.d("Skipping content prefetch on metered network (use mobile data is off)")
+            return
+        }
+
         for (poi in pointsOfInterest.take(MAX_PREFETCH)) {
             if (tourContentDao.getContentForPoi(poi.id) != null) continue
             try {
