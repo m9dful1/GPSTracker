@@ -1,11 +1,7 @@
 package com.spiritwisestudios.gpstracker.data.api
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertThrows
-import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.IOException
 
 class PlacesApiServiceTest {
 
@@ -37,77 +33,28 @@ class PlacesApiServiceTest {
         assertEquals("OTHER", PlacesApiService.mapPlaceTypesToCategory(emptyList()))
     }
 
-    // --- parseNearbySearchResponse ---
-
-    private val sampleResponse = """
-        {
-          "status": "OK",
-          "results": [
-            {
-              "place_id": "abc123",
-              "name": "City Museum",
-              "geometry": { "location": { "lat": 37.1, "lng": -122.2 } },
-              "vicinity": "1 Museum Way",
-              "types": ["museum", "point_of_interest"],
-              "rating": 4.6,
-              "photos": [{ "photo_reference": "photoref1" }]
-            },
-            {
-              "place_id": "def456",
-              "name": "Gas Stop",
-              "geometry": { "location": { "lat": 37.2, "lng": -122.3 } },
-              "vicinity": "2 Fuel Rd",
-              "types": ["gas_station"]
-            }
-          ]
-        }
-    """.trimIndent()
+    // New Places API type names (not present in the legacy API)
 
     @Test
-    fun `parses places and filters out boring types`() {
-        val pois = PlacesApiService.parseNearbySearchResponse(sampleResponse, "KEY")
-
-        assertEquals(1, pois.size)
-        val museum = pois[0]
-        assertEquals("abc123", museum.id)
-        assertEquals("abc123", museum.placeId)
-        assertEquals("City Museum", museum.name)
-        assertEquals("CULTURAL", museum.category)
-        assertEquals(37.1, museum.latLng.latitude, 1e-6)
-        assertEquals(4.6, museum.rating!!, 1e-6)
-        assertTrue(museum.photoUrl!!.contains("photoref1"))
-        assertTrue(museum.photoUrl!!.contains("KEY"))
+    fun `historical landmark maps to historical`() {
+        assertEquals("HISTORICAL", PlacesApiService.mapPlaceTypesToCategory(listOf("historical_landmark")))
+        assertEquals("HISTORICAL", PlacesApiService.mapPlaceTypesToCategory(listOf("monument")))
     }
 
     @Test
-    fun `zero results yields empty list`() {
-        val json = """{ "status": "ZERO_RESULTS", "results": [] }"""
-        assertTrue(PlacesApiService.parseNearbySearchResponse(json, "KEY").isEmpty())
+    fun `national park and garden map to natural`() {
+        assertEquals("NATURAL", PlacesApiService.mapPlaceTypesToCategory(listOf("national_park")))
+        assertEquals("NATURAL", PlacesApiService.mapPlaceTypesToCategory(listOf("botanical_garden")))
     }
 
     @Test
-    fun `error status throws`() {
-        val json = """{ "status": "REQUEST_DENIED", "error_message": "bad key", "results": [] }"""
-        val e = assertThrows(IOException::class.java) {
-            PlacesApiService.parseNearbySearchResponse(json, "KEY")
-        }
-        assertTrue(e.message!!.contains("REQUEST_DENIED"))
+    fun `performing arts theater maps to cultural`() {
+        assertEquals("CULTURAL", PlacesApiService.mapPlaceTypesToCategory(listOf("performing_arts_theater")))
     }
 
     @Test
-    fun `missing photo yields null photoUrl`() {
-        val json = """
-            {
-              "status": "OK",
-              "results": [{
-                "place_id": "x",
-                "name": "Old Church",
-                "geometry": { "location": { "lat": 1.0, "lng": 2.0 } },
-                "types": ["church"]
-              }]
-            }
-        """.trimIndent()
-
-        assertNull(PlacesApiService.parseNearbySearchResponse(json, "KEY")[0].photoUrl)
+    fun `cultural match wins over dining when both present`() {
+        // A museum with a cafe inside should narrate as a museum
+        assertEquals("CULTURAL", PlacesApiService.mapPlaceTypesToCategory(listOf("cafe", "museum")))
     }
 }

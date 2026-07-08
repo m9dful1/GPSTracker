@@ -48,8 +48,10 @@ object AppModule {
     @Singleton
     fun providePlacesClient(@ApplicationContext context: Context): PlacesClient {
         if (!Places.isInitialized()) {
-            Places.initialize(context, BuildConfig.MAPS_API_KEY)
-            Timber.d("Places SDK initialized")
+            // Use the new Places API — the legacy Places API is not enabled on
+            // this project's API key.
+            Places.initializeWithNewPlacesApiEnabled(context, BuildConfig.MAPS_API_KEY)
+            Timber.d("Places SDK initialized (new Places API)")
         }
         return Places.createClient(context)
     }
@@ -72,11 +74,8 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun providePlacesApiService(
-        placesClient: PlacesClient,
-        okHttpClient: OkHttpClient
-    ): PlacesApiService {
-        return PlacesApiService(placesClient, okHttpClient, BuildConfig.MAPS_API_KEY)
+    fun providePlacesApiService(placesClient: PlacesClient): PlacesApiService {
+        return PlacesApiService(placesClient)
     }
 
     @Provides

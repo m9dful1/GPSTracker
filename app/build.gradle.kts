@@ -47,6 +47,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Places SDK 4.x uses java.time, which needs desugaring below API 26
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
         jvmTarget = "17"
@@ -73,8 +75,10 @@ dependencies {
     implementation(libs.play.services.maps)
     implementation(libs.play.services.location)
     
-    // Places API for points of interest
-    implementation("com.google.android.libraries.places:places:3.3.0")
+    // Places SDK (Places API New) for points of interest and autocomplete
+    implementation("com.google.android.libraries.places:places:4.4.1")
+
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     
     // Navigation component
     implementation("androidx.navigation:navigation-fragment-ktx:2.7.7")
@@ -88,6 +92,8 @@ dependencies {
     // Kotlin coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    // Task.await() bridging for Places SDK calls
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
     
     // Room database for local caching (using KSP instead of KAPT)
     implementation("androidx.room:room-runtime:2.6.1")
@@ -103,8 +109,8 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     
     // Dagger Hilt for dependency injection (using KSP instead of KAPT)
-    implementation("com.google.dagger:hilt-android:2.48")
-    ksp("com.google.dagger:hilt-compiler:2.48")
+    implementation("com.google.dagger:hilt-android:2.56.2")
+    ksp("com.google.dagger:hilt-compiler:2.56.2")
     
     // Jetpack DataStore for preferences
     implementation("androidx.datastore:datastore-preferences:1.0.0")

@@ -72,13 +72,13 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import com.google.android.libraries.places.api.model.AutocompletePrediction
+import com.google.android.libraries.places.api.model.AutocompleteSessionToken
 import com.google.android.libraries.places.api.model.Place
-import com.google.android.libraries.places.api.model.TypeFilter
-import com.google.android.libraries.places.widget.AutocompleteSupportFragment
-import com.google.android.libraries.places.widget.listener.PlaceSelectionListener
-import com.google.android.libraries.places.widget.model.AutocompleteActivityMode
-import com.google.android.libraries.places.widget.Autocomplete
-import com.google.android.libraries.places.widget.AutocompleteActivity
+import com.google.android.libraries.places.api.net.FetchPlaceRequest
+import com.google.android.libraries.places.widget.PlaceAutocomplete
+import com.google.android.libraries.places.widget.PlaceAutocompleteActivity
+import kotlinx.coroutines.tasks.await
 import android.app.Activity
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.common.api.Status
@@ -194,44 +194,71 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         private const val SCOUT_RADIUS_METERS = 750
     }
     
-    // ActivityResultLauncher for Places Autocomplete
+    // ActivityResultLauncher for Places Autocomplete (New)
     private val placesAutocompleteResult = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         when (result.resultCode) {
-            Activity.RESULT_OK -> {
+            PlaceAutocompleteActivity.RESULT_OK -> {
                 result.data?.let { data ->
-                    try {
-                        val place = Autocomplete.getPlaceFromIntent(data)
-                        Timber.d("Place selected: ${place.name} at ${place.latLng}")
-                        // Start navigation to the selected place
-                        startNavigationToPlace(place)
-                    } catch (e: Exception) {
-                        Timber.e(e, "Error processing place result")
-                        Toast.makeText(this, "Error processing place: ${e.message}", Toast.LENGTH_SHORT).show()
+                    val prediction = PlaceAutocomplete.getPredictionFromIntent(data)
+                    val sessionToken = PlaceAutocomplete.getSessionTokenFromIntent(data)
+                    if (prediction != null) {
+                        navigateToPrediction(prediction, sessionToken)
                     }
                 }
             }
-            AutocompleteActivity.RESULT_ERROR -> {
-                result.data?.let { data ->
-                    val status = Autocomplete.getStatusFromIntent(data)
-                    Timber.e("AutocompleteError: ${status.statusMessage}")
-                    
-                    // Provide more helpful error messages
-                    val errorMessage = when {
-                        status.statusMessage?.contains("not authorized") == true -> 
-                            "API authorization error. Please ensure Places API is enabled in Google Cloud Console."
-                        status.statusMessage?.contains("network") == true -> 
-                            "Network error. Please check your connection and try again."
-                        else -> "Error: ${status.statusMessage}"
-                    }
-                    
-                    Toast.makeText(this, errorMessage, Toast.LENGTH_LONG).show()
+            PlaceAutocompleteActivity.RESULT_ERROR -> {
+                val status = result.data?.let { PlaceAutocomplete.getResultStatusFromIntent(it) }
+                Timber.e("AutocompleteError: ${status?.statusMessage}")
+
+                // Provide more helpful error messages
+                val errorMessage = when {
+                    status?.statusMessage?.contains("not authorized") == true ->
+                        "API authorization error. Please ensure Places API (New) is enabled in Google Cloud Console."
+                    status?.statusMessage?.contains("network") == true ->
+                        "Network error. Please check your connection and try again."
+                    else -> "Error: ${status?.statusMessage}"
                 }
+
+                Toast.makeText(this, errorMessage, Toast.LENGTH_LONG).show()
             }
             Activity.RESULT_CANCELED -> {
                 // User canceled the operation
                 Timber.d("Places autocomplete canceled by user")
+            }
+        }
+    }
+
+    /**
+     * Autocomplete (New) returns a prediction (place ID + text), not a full
+     * Place — fetch the location before starting navigation. Reusing the
+     * widget's session token bills the autocomplete + fetch as one session.
+     */
+    private fun navigateToPrediction(
+        prediction: AutocompletePrediction,
+        sessionToken: AutocompleteSessionToken?
+    ) {
+        lifecycleScope.launch {
+            try {
+                val request = FetchPlaceRequest.builder(
+                    prediction.placeId,
+                    listOf(
+                        Place.Field.ID,
+                        Place.Field.DISPLAY_NAME,
+                        Place.Field.LOCATION,
+                        Place.Field.FORMATTED_ADDRESS
+                    )
+                ).apply { sessionToken?.let { setSessionToken(it) } }.build()
+
+                val place = placesClient.fetchPlace(request).await().place
+                Timber.d("Place selected: ${place.displayName} at ${place.location}")
+                startNavigationToPlace(place)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.e(e, "Error processing place result")
+                Toast.makeText(this@MainActivity, "Error processing place: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1015,10 +1042,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     // Start navigation to a selected Place
     private fun startNavigationToPlace(place: Place) {
         // Make sure we have the lat/lng
-        val destinationLatLng = place.latLng
+        val destinationLatLng = place.location
         if (destinationLatLng != null) {
             // Format display name
-            val displayName = place.name ?: place.address ?: "Selected destination"
+            val displayName = place.displayName ?: place.formattedAddress ?: "Selected destination"
             
             // Start common navigation setup
             navigationJob?.cancel()
@@ -1351,37 +1378,24 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         lastAnnouncementKey = null
     }
 
-    // Launch Places Autocomplete
+    // Launch Places Autocomplete (New). No type filter: users can search
+    // businesses and street addresses alike, matching Google Maps behavior.
     private fun launchPlacesAutocomplete() {
         try {
-            // Set the fields to specify which types of place data to return
-            val fields = listOf(
-                Place.Field.ID,
-                Place.Field.NAME,
-                Place.Field.ADDRESS,
-                Place.Field.LAT_LNG,
-                Place.Field.TYPES,
-                Place.Field.RATING,
-                Place.Field.PHOTO_METADATAS
-            )
-
             // Get current location to use as bias
             val currentLatLng = lastKnownLatLng ?: LatLng(0.0, 0.0)
-            
+
             // Create a bias rectangle around current location - approx 10km radius
             val bias = RectangularBounds.newInstance(
                 LatLng(currentLatLng.latitude - 0.1, currentLatLng.longitude - 0.1),
                 LatLng(currentLatLng.latitude + 0.1, currentLatLng.longitude + 0.1)
             )
 
-            // Start the autocomplete intent with more options
-            val intent = Autocomplete.IntentBuilder(
-                AutocompleteActivityMode.OVERLAY, fields)
-                .setTypeFilter(TypeFilter.ESTABLISHMENT) // Change from ADDRESS to ESTABLISHMENT for restaurants, businesses, etc.
-                .setLocationBias(bias) // Add location bias
-                .setCountries(listOf("US")) // Limit to US for more relevant results
-                .build(this)
-                
+            val intent = PlaceAutocomplete.createIntent(this) {
+                setLocationBias(bias)
+                setCountries(listOf("US")) // Limit to US for more relevant results
+            }
+
             placesAutocompleteResult.launch(intent)
         } catch (e: Exception) {
             Toast.makeText(this, "Error launching places autocomplete: ${e.message}", Toast.LENGTH_SHORT).show()

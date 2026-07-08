@@ -213,14 +213,14 @@ Narration content comes from Wikipedia: the app geosearches for the article matc
 ### Data Layer
 
 #### API Services
-- `PlacesApiService.kt`: Service that interacts with Google Places API
+- `PlacesApiService.kt`: Service that interacts with the Google Places API (New) via the Places SDK
   ```kotlin
-  class PlacesApiService(placesClient: PlacesClient, httpClient: OkHttpClient, apiKey: String) {
-      suspend fun getNearbyPlaces(center: LatLng, radius: Int): List<PointOfInterest>  // Nearby Search web service
-      suspend fun getPlaceDetails(placeId: String): PointOfInterest                    // Places SDK fetchPlace
+  class PlacesApiService(placesClient: PlacesClient) {
+      suspend fun getNearbyPlaces(center: LatLng, radius: Int): List<PointOfInterest>  // Nearby Search (New) — searchNearby
+      suspend fun getPlaceDetails(placeId: String): PointOfInterest                    // Place Details (New) — fetchPlace
   }
   ```
-  Nearby discovery uses the Places Nearby Search web service so any point can be searched (sampled route points, not just the device position). Results are filtered to tour-worthy categories, and photo references become fetchable photo URLs.
+  Nearby discovery uses Nearby Search (New), which takes a `CircularBounds` around any point (sampled route points, not just the device position). Results are filtered to tour-worthy categories client-side.
 - `WikipediaApiService.kt`: Real facts for narration
   ```kotlin
   class WikipediaApiService(httpClient: OkHttpClient) {
@@ -912,10 +912,11 @@ By implementing these fixes, the application should have more reliable navigatio
 - **Route setup is cancelable**: geocoding and route calculation are network calls that hang exactly when navigation is wanted (bad signal), and both used to be uncancelable — geocoding even ran with no visible feedback (its status text went to a hidden card), and "End Navigation" told the service to stop but never cancelled the status-collecting coroutine. Navigation work is now one tracked `navigationJob`: the status card appears immediately in a "Calculating route… / Cancel" state during geocoding, End Navigation (or entering a new destination) cancels whatever is in flight, and `CancellationException` is rethrown rather than toasted as an error.
 - **Speed-adaptive navigation camera**: the follow camera zoomed to a fixed 17 regardless of speed. `CameraLogic.zoomForSpeed` now glides continuously from 18 (walking — the next turn matters) to 15 (≥100 km/h — the road far ahead matters), fed by the GPS speed captured in the location callback. Continuous interpolation rather than zoom bands, so speed jitter can't bounce the camera at a band edge; negative GPS speeds are treated as stationary.
 - **Top search bar replaces the navigation FAB**: destination search moved from a bottom-right FAB to a Google-Maps-style "Where to?" bar at the top of the map, opening Places Autocomplete on tap. All top-anchored UI (search bar, turn instructions, tour status, GPS banner, destination input) now lives in one stacked `top_cards` column, which fixes their previous overlap and lets the status-bar inset be applied once to the container. The bar yields while navigating or while the manual destination input is open, and returns on End Navigation/cancel/geocode failure.
+- **Migrated to Places API (New)**: the app ran entirely on the legacy Places API — retired for new Google Cloud projects — so a rotated key broke autocomplete ("legacy API" error) and would have broken tour discovery next. Places SDK 3.3.0 → 4.4.1 with `Places.initializeWithNewPlacesApiEnabled`, which pulled a toolchain upgrade with it: Kotlin 1.9 → 2.1 (the SDK ships Kotlin 2.1 metadata), matching KSP/Hilt bumps, and core-library desugaring (the SDK uses `java.time`; minSdk is 24). The hand-rolled Nearby Search/Photo web calls (URL-embedded API key, manual JSON parsing) became the SDK's `searchNearby()` — OkHttp, response parsing, and the key parameter all dropped out of `PlacesApiService`. The search bar uses the new `PlaceAutocomplete` widget, which returns a prediction rather than a full Place; a follow-up `fetchPlace` (sharing the widget's session token, so the pair bills as one autocomplete session) resolves coordinates before navigation starts. The old `ESTABLISHMENT` type filter is gone — street addresses are now searchable, matching Google Maps. `mapPlaceTypesToCategory` gained new-API type names (`historical_landmark`, `national_park`, `botanical_garden`, `performing_arts_theater`, …); nearby results no longer carry photo URLs (Photos (New) requires a billable per-place resolve call and nothing in the UI rendered POI photos).
 
 ## Remaining TODOs
 
 - UI/UX polish: surface monitoring status (battery/speed).
-- Dependency updates: Places SDK 3.3.0 → 4.x (Autocomplete `TypeFilter` and `Place.Field.NAME` are deprecated), `LocationRequest.create()` → `LocationRequest.Builder` in MainActivity.
-- Production key hygiene: split SDK vs web-service API keys; proxy Directions/Places web calls through a backend.
+- Dependency updates: `LocationRequest.create()` → `LocationRequest.Builder` in MainActivity; Directions web service → Routes API.
+- Production key hygiene: split SDK vs web-service API keys; proxy the Directions web calls through a backend.
 - Instrumented tests for MainActivity flows and TourModeService.
