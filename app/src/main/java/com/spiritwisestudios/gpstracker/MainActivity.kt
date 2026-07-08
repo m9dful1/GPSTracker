@@ -59,6 +59,7 @@ import com.spiritwisestudios.gpstracker.ui.fragment.TourSettingsFragment
 import com.spiritwisestudios.gpstracker.ui.fragment.TurnInstructionFragment
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
 import com.spiritwisestudios.gpstracker.util.AppConstants
+import com.spiritwisestudios.gpstracker.util.CameraLogic
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -117,6 +118,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     // The in-flight navigation work (geocoding, then status collection),
     // tracked so canceling actually stops it
     private var navigationJob: Job? = null
+
+    // Latest GPS speed, for the speed-adaptive navigation camera
+    private var lastKnownSpeedMps = 0f
 
     // Flag to check if this is the first location update
     private var isFirstUpdate = true
@@ -277,6 +281,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
                 locationResult.lastLocation?.let { location ->
+                    lastKnownSpeedMps = if (location.hasSpeed()) location.speed else 0f
                     updateLocationOnMap(location)
                     refreshNearbyPlacesIfNeeded()
                 }
@@ -1157,10 +1162,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             locationHistory.removeFirst()
         }
         
-        // Move camera to follow current location with some bearing and tilt
+        // Move camera to follow current location with some bearing and tilt;
+        // zoom widens with speed so highway driving shows the road ahead
         val cameraPosition = CameraPosition.Builder()
             .target(currentLocation)
-            .zoom(17f)
+            .zoom(CameraLogic.zoomForSpeed(lastKnownSpeedMps))
             .bearing(getUserBearing())
             .tilt(45f)
             .build()
