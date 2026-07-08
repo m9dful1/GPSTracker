@@ -153,7 +153,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     private lateinit var btnTourSettings: Button
     
     // UI elements for navigation
-    private lateinit var fabNavigation: FloatingActionButton
+    private lateinit var searchBarCard: CardView
     private lateinit var destinationInputView: View
     private lateinit var etDestination: TextInputEditText
     private lateinit var btnNavigate: Button
@@ -305,7 +305,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         btnTourSettings = findViewById(R.id.btn_tour_settings)
         
         // Initialize navigation UI elements
-        fabNavigation = findViewById(R.id.fab_navigation)
+        searchBarCard = findViewById(R.id.search_bar_card)
         destinationInputView = findViewById(R.id.destination_input)
         etDestination = destinationInputView.findViewById(R.id.et_destination)
         btnNavigate = destinationInputView.findViewById(R.id.btn_navigate)
@@ -326,13 +326,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
      */
     private fun applyWindowInsets() {
         val bottomViews = listOf<View>(
-            binding.fabTourMode, binding.fabNavigation, binding.fabRecenter,
+            binding.fabTourMode, binding.fabRecenter,
             binding.fabLayers, binding.fabJournal, binding.bottomCards
         )
-        val topViews = listOf<View>(
-            binding.turnInstructionContainer, binding.tourModeStatus,
-            binding.gpsStatusCard, destinationInputView
-        )
+        // Everything top-anchored lives in one stacked column, so the
+        // status-bar inset is applied once to the container
+        val topViews = listOf<View>(binding.topCards)
         val baseBottomMargins = bottomViews.associateWith {
             (it.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin
         }
@@ -389,13 +388,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             })
         }
 
-        // Set up click listener for the navigation FAB
-        fabNavigation.setOnClickListener {
-            if (isNavigating) {
-                showNavigationStatus()
-            } else {
-                launchPlacesAutocomplete()
-            }
+        // The search bar opens Places Autocomplete, like Google Maps
+        searchBarCard.setOnClickListener {
+            launchPlacesAutocomplete()
         }
         
         // Set up click listener for the close destination button
@@ -953,15 +948,19 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         }
     }
 
-    // Show the destination input card
+    // Show the destination input card (it takes the search bar's slot)
     private fun showDestinationInput() {
         destinationInputView.visibility = View.VISIBLE
         navigationStatusCard.visibility = View.GONE
+        searchBarCard.visibility = View.GONE
     }
-    
+
     // Hide the destination input card
     private fun hideDestinationInput() {
         destinationInputView.visibility = View.GONE
+        if (!isNavigating) {
+            searchBarCard.visibility = View.VISIBLE
+        }
     }
     
     // Show the navigation status card
@@ -989,6 +988,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
                 binding.btnStopNavigation.setOnClickListener { stopNavigation() }
                 hideDestinationInput()
                 showNavigationStatus()
+                searchBarCard.visibility = View.GONE
 
                 // Get coordinates from the address using interface method (no casting needed)
                 val destinationLatLng = navigationService.geocodeAddress(destinationAddress)
@@ -999,6 +999,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
                 } else {
                     Toast.makeText(this@MainActivity, "Could not find location: $destinationAddress", Toast.LENGTH_SHORT).show()
                     hideNavigationStatus()
+                    searchBarCard.visibility = View.VISIBLE
                 }
             } catch (e: CancellationException) {
                 throw e // cancellation is the user's doing, not an error
@@ -1006,6 +1007,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
                 Timber.e(e, "Error starting navigation: ${e.message}")
                 Toast.makeText(this@MainActivity, "Error starting navigation: ${e.message}", Toast.LENGTH_SHORT).show()
                 hideNavigationStatus()
+                searchBarCard.visibility = View.VISIBLE
             }
         }
     }
@@ -1039,6 +1041,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             isNavigating = true
             hideDestinationInput()
             showNavigationStatus()
+            searchBarCard.visibility = View.GONE
             
             // Update UI with Start Navigation button
             binding.btnStopNavigation.text = getString(R.string.start_navigation)
@@ -1329,6 +1332,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         isNavigating = false
         hideNavigationStatus()
         hideTurnInstructions()
+        searchBarCard.visibility = View.VISIBLE
 
         // Remove route from map
         routePolyline?.remove()

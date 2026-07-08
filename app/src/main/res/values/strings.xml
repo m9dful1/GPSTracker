@@ -3,6 +3,7 @@
     <string name="navigation_fab_description">Navigate to destination</string>
     <string name="tour_mode_fab_description">Activate Tour Mode</string>
     <string name="enter_destination">Enter Destination</string>
+    <string name="search_bar_hint">Where to?</string>
     <string name="destination_hint">Destination</string>
     <string name="navigate_button">Navigate</string>
     <string name="cancel_button">Cancel</string>
