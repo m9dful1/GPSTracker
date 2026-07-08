@@ -51,6 +51,7 @@ import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
 import com.spiritwisestudios.gpstracker.service.TourModeService
+import com.spiritwisestudios.gpstracker.ui.fragment.MapLayersBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.PlaceDetailsBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.TourJournalBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.TourSettingsFragment
@@ -88,8 +89,9 @@ import android.util.Log
 // Removed debug-time API key logger to avoid accidental key exposure
 
 @AndroidEntryPoint
-class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarkerClickListener, 
-    TurnInstructionFragment.NavigationDetailsProvider, TurnInstructionFragment.NavigationInstructionController {
+class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarkerClickListener,
+    TurnInstructionFragment.NavigationDetailsProvider, TurnInstructionFragment.NavigationInstructionController,
+    MapLayersBottomSheet.MapLayersHost {
 
     private lateinit var mMap: GoogleMap
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -403,16 +405,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             }
         }
 
-        // Layers FAB: toggle traffic and cycle map types
+        // Layers FAB: pick the map type and toggle traffic independently
         findViewById<FloatingActionButton>(R.id.fab_layers).setOnClickListener {
-            mMap.isTrafficEnabled = !mMap.isTrafficEnabled
-            mMap.mapType = when (mMap.mapType) {
-                GoogleMap.MAP_TYPE_NORMAL -> GoogleMap.MAP_TYPE_SATELLITE
-                GoogleMap.MAP_TYPE_SATELLITE -> GoogleMap.MAP_TYPE_TERRAIN
-                GoogleMap.MAP_TYPE_TERRAIN -> GoogleMap.MAP_TYPE_HYBRID
-                else -> GoogleMap.MAP_TYPE_NORMAL
-            }
-            Toast.makeText(this, "Traffic: ${mMap.isTrafficEnabled}", Toast.LENGTH_SHORT).show()
+            MapLayersBottomSheet.newInstance()
+                .show(supportFragmentManager, MapLayersBottomSheet.TAG)
         }
 
         // Journal FAB: every place the tour guide has narrated so far
@@ -610,6 +606,24 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         
         isTourModeActive = false
         updateTourModeUI(false)
+    }
+
+    // --- MapLayersBottomSheet.MapLayersHost ---
+    // The layers sheet reads and mutates the map through these; guarded in
+    // case the sheet is somehow opened before the map is ready.
+
+    override fun currentMapType(): Int =
+        if (::mMap.isInitialized) mMap.mapType else GoogleMap.MAP_TYPE_NORMAL
+
+    override fun isTrafficEnabled(): Boolean =
+        ::mMap.isInitialized && mMap.isTrafficEnabled
+
+    override fun onMapTypeSelected(mapType: Int) {
+        if (::mMap.isInitialized) mMap.mapType = mapType
+    }
+
+    override fun onTrafficToggled(enabled: Boolean) {
+        if (::mMap.isInitialized) mMap.isTrafficEnabled = enabled
     }
 
     // When the map is ready, enable location display
