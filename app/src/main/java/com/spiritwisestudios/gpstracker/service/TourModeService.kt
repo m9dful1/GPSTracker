@@ -89,6 +89,10 @@ class TourModeService : Service() {
     // arrival summary ("you heard about 7 places along the way")
     private var tripNarrationCount = 0
 
+    // When each automatic narration was queued, for the per-hour cap.
+    // Entries older than the window are pruned as new ones arrive.
+    private val narrationTimes = mutableListOf<Long>()
+
     companion object {
         // Search this far around the user (or route samples) for POIs
         private const val DISCOVERY_RADIUS_METERS = 1500
@@ -503,6 +507,18 @@ class TourModeService : Service() {
             return
         }
 
+        // Honor the "max notifications per hour" setting: a tour guide who
+        // won't stop talking gets tuned out. Skipped places stay unvisited,
+        // so they're eligible again once the hour rolls over.
+        val now = System.currentTimeMillis()
+        while (narrationTimes.isNotEmpty() && now - narrationTimes.first() > TourLogic.NARRATION_WINDOW_MS) {
+            narrationTimes.removeAt(0)
+        }
+        if (!TourLogic.narrationAllowed(narrationTimes, now, userPreferences.maxNotificationsPerHour)) {
+            Timber.d("Skipping ${poi.name}: cap of ${userPreferences.maxNotificationsPerHour} narrations/hour reached")
+            return
+        }
+
         try {
             // Set as current POI
             currentPoi = poi
@@ -519,8 +535,10 @@ class TourModeService : Service() {
             // Calculate content priority (user prefs, rating, alert proximity)
             val calculatedPriority = TourLogic.contentPriorityFor(poi, userPreferences, priority)
 
-            // Queue for delivery
-            contentService.queueContentForDelivery(content, calculatedPriority)
+            // Queue for delivery; only accepted narrations count toward the cap
+            if (contentService.queueContentForDelivery(content, calculatedPriority)) {
+                narrationTimes.add(now)
+            }
 
             // If nothing is currently being spoken, start speaking
             if (!audioService.isSpeaking()) {

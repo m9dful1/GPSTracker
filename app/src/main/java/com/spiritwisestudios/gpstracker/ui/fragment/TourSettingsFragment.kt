@@ -19,6 +19,7 @@ import com.spiritwisestudios.gpstracker.R
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
+import com.spiritwisestudios.gpstracker.util.TourLogic
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import java.util.EnumSet
@@ -177,7 +178,7 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         // Max Notifications SeekBar
         seekBarMaxNotifications.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                tvMaxNotificationsValue.text = "$progress per hour"
+                tvMaxNotificationsValue.text = TourLogic.narrationCapLabel(progress)
             }
             
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -243,7 +244,7 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         tvNotifyDistanceValue.text = "${preferences.notifyDistance}m"
         
         seekBarMaxNotifications.progress = preferences.maxNotificationsPerHour
-        tvMaxNotificationsValue.text = "${preferences.maxNotificationsPerHour} per hour"
+        tvMaxNotificationsValue.text = TourLogic.narrationCapLabel(preferences.maxNotificationsPerHour)
         
         // Battery Usage
         switchPrefetchContent.isChecked = preferences.prefetchContent

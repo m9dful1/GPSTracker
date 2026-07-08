@@ -4,6 +4,7 @@ import com.google.android.gms.maps.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -242,6 +243,45 @@ class TourLogicTest {
         assertEquals(TourLogic.RelativeDirection.BEHIND, TourLogic.relativeDirection(0f, 135f))
         assertEquals(TourLogic.RelativeDirection.LEFT, TourLogic.relativeDirection(0f, 225f))
         assertEquals(TourLogic.RelativeDirection.AHEAD, TourLogic.relativeDirection(0f, 315f))
+    }
+
+    // --- narrationAllowed / narrationCapLabel ---
+
+    private val now = 10_000_000_000L // arbitrary fixed "now"
+
+    @Test
+    fun `first narration of the hour is allowed`() {
+        assertTrue(TourLogic.narrationAllowed(emptyList(), now, maxPerHour = 10))
+    }
+
+    @Test
+    fun `narration is blocked once the hourly cap is reached`() {
+        val recent = listOf(now - 1_000L, now - 2_000L, now - 3_000L)
+        assertFalse(TourLogic.narrationAllowed(recent, now, maxPerHour = 3))
+        assertTrue(TourLogic.narrationAllowed(recent, now, maxPerHour = 4))
+    }
+
+    @Test
+    fun `narrations older than an hour age out of the window`() {
+        val stale = listOf(now - TourLogic.NARRATION_WINDOW_MS - 1L)
+        assertTrue(TourLogic.narrationAllowed(stale, now, maxPerHour = 1))
+    }
+
+    @Test
+    fun `narration exactly an hour old no longer counts`() {
+        val boundary = listOf(now - TourLogic.NARRATION_WINDOW_MS)
+        assertTrue(TourLogic.narrationAllowed(boundary, now, maxPerHour = 1))
+    }
+
+    @Test
+    fun `cap of zero silences automatic narration`() {
+        assertFalse(TourLogic.narrationAllowed(emptyList(), now, maxPerHour = 0))
+    }
+
+    @Test
+    fun `cap label spells out the muted state`() {
+        assertEquals("10 per hour", TourLogic.narrationCapLabel(10))
+        assertEquals("0 per hour — automatic narration off", TourLogic.narrationCapLabel(0))
     }
 
     // --- narrationIntroFor ---

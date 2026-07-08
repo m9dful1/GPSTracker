@@ -94,6 +94,33 @@ object TourLogic {
         }
     }
 
+    /** Sliding window for the narrations-per-hour cap. */
+    const val NARRATION_WINDOW_MS = 60L * 60L * 1000L
+
+    /**
+     * Whether another automatic narration fits under the user's hourly cap.
+     * Only timestamps within the last hour count against the cap. A cap of
+     * zero reads literally: no automatic narrations at all (on-demand
+     * playback from the place details sheet is unaffected).
+     */
+    fun narrationAllowed(
+        recentNarrationTimes: List<Long>,
+        nowMillis: Long,
+        maxPerHour: Int
+    ): Boolean {
+        val windowStart = nowMillis - NARRATION_WINDOW_MS
+        return recentNarrationTimes.count { it > windowStart } < maxPerHour
+    }
+
+    /**
+     * Settings label for the narrations-per-hour slider. Zero is spelled
+     * out so the user knows they just muted the tour guide.
+     */
+    fun narrationCapLabel(maxPerHour: Int): String {
+        return if (maxPerHour <= 0) "0 per hour — automatic narration off"
+        else "$maxPerHour per hour"
+    }
+
     /**
      * Cap the narration detail level by travel speed: fast travel leaves
      * less time per place (and more places per minute), so facts get
