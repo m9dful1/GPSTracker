@@ -47,6 +47,7 @@ import com.google.android.gms.maps.UiSettings
 import com.google.android.libraries.places.api.net.PlacesClient
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.textfield.TextInputEditText
+import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
@@ -60,6 +61,7 @@ import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
 import com.spiritwisestudios.gpstracker.util.AppConstants
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.text.SimpleDateFormat
@@ -99,6 +101,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
 
     @Inject
     lateinit var placesClient: PlacesClient
+
+    @Inject
+    lateinit var userPreferencesRepository: UserPreferencesRepository
 
     // Use the viewModels() delegate to get the ViewModel from Hilt
     private val placesViewModel: PlacesViewModel by viewModels()
@@ -620,10 +625,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
 
     override fun onMapTypeSelected(mapType: Int) {
         if (::mMap.isInitialized) mMap.mapType = mapType
+        lifecycleScope.launch { userPreferencesRepository.setMapType(mapType) }
     }
 
     override fun onTrafficToggled(enabled: Boolean) {
         if (::mMap.isInitialized) mMap.isTrafficEnabled = enabled
+        lifecycleScope.launch { userPreferencesRepository.setMapTrafficEnabled(enabled) }
     }
 
     // When the map is ready, enable location display
@@ -655,6 +662,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         // The map ignores the app's DayNight theme; style it dark ourselves
         // so night drives aren't a full-screen white blast
         applyMapNightStyleIfNeeded()
+
+        // Restore the layers-sheet choices from the last session
+        lifecycleScope.launch {
+            val display = userPreferencesRepository.mapDisplayFlow.first()
+            mMap.mapType = display.mapType
+            mMap.isTrafficEnabled = display.trafficEnabled
+        }
 
         // Stop following the user when they pan/zoom manually (Google Maps
         // behavior); the recenter FAB turns following back on.

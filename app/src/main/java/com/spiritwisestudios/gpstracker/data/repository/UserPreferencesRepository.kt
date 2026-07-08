@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.google.android.gms.maps.GoogleMap
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import kotlinx.coroutines.flow.Flow
@@ -43,6 +44,8 @@ class UserPreferencesRepository @Inject constructor(
         val USE_MOBILE_DATA = booleanPreferencesKey("use_mobile_data")
         val DARK_MODE_ENABLED = booleanPreferencesKey("dark_mode_enabled")
         val PREFERRED_CATEGORIES = stringSetPreferencesKey("preferred_categories")
+        val MAP_TYPE = intPreferencesKey("map_type")
+        val MAP_TRAFFIC = booleanPreferencesKey("map_traffic")
     }
 
     companion object {
@@ -68,6 +71,21 @@ class UserPreferencesRepository @Inject constructor(
                     null
                 }
             }.toSet()
+        }
+
+        /**
+         * Sanitize a stored map type: never saved or not a real GoogleMap
+         * constant (e.g. from a different app version) falls back to the
+         * normal map rather than a blank MAP_TYPE_NONE screen.
+         */
+        internal fun normalizeMapType(stored: Int?): Int {
+            return when (stored) {
+                GoogleMap.MAP_TYPE_NORMAL,
+                GoogleMap.MAP_TYPE_SATELLITE,
+                GoogleMap.MAP_TYPE_TERRAIN,
+                GoogleMap.MAP_TYPE_HYBRID -> stored
+                else -> GoogleMap.MAP_TYPE_NORMAL
+            }
         }
     }
 
@@ -117,6 +135,30 @@ class UserPreferencesRepository @Inject constructor(
     }
 
     /**
+     * Map display choices (type, traffic) from the layers sheet, restored
+     * when the map loads so they survive app restarts.
+     */
+    val mapDisplayFlow: Flow<MapDisplayPreferences> = context.userPreferencesDataStore.data
+        .map { preferences ->
+            MapDisplayPreferences(
+                mapType = normalizeMapType(preferences[PreferencesKeys.MAP_TYPE]),
+                trafficEnabled = preferences[PreferencesKeys.MAP_TRAFFIC] ?: false
+            )
+        }
+
+    suspend fun setMapType(mapType: Int) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[PreferencesKeys.MAP_TYPE] = mapType
+        }
+    }
+
+    suspend fun setMapTrafficEnabled(enabled: Boolean) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[PreferencesKeys.MAP_TRAFFIC] = enabled
+        }
+    }
+
+    /**
      * Update audio settings only.
      */
     suspend fun updateAudioSettings(
@@ -134,4 +176,13 @@ class UserPreferencesRepository @Inject constructor(
             autoPlayContent?.let { preferences[PreferencesKeys.AUTO_PLAY_CONTENT] = it }
         }
     }
-} 
+}
+
+/**
+ * How the map is displayed: the layers-sheet choices, separate from the
+ * tour-behavior settings in [UserPreferences].
+ */
+data class MapDisplayPreferences(
+    val mapType: Int,
+    val trafficEnabled: Boolean
+)
