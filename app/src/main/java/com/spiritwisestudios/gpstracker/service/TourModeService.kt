@@ -643,27 +643,28 @@ class TourModeService : Service() {
 
     /**
      * Prefix the narration with where the place sits relative to the current
-     * direction of travel. The GPS heading is only meaningful while moving,
-     * so a stationary user gets a neutral introduction instead.
+     * direction of travel, and roughly how far away it is. The GPS heading
+     * is only meaningful while moving, so a stationary user gets a neutral
+     * introduction — but still hears the distance, which is exactly what a
+     * parked scout wants to know.
      */
     private suspend fun spokenNarrationFor(poi: PointOfInterest?, content: TourContent): String {
         if (poi == null) return content.content
 
         val heading = locationAwarenessService.getCurrentHeading()
         val speed = locationAwarenessService.getCurrentSpeed() ?: 0f
-        val location = if (heading != null && speed >= TourLogic.MIN_HEADING_SPEED_MPS) {
-            locationAwarenessService.getCurrentLocation()
-        } else {
-            null
-        }
+        val location = locationAwarenessService.getCurrentLocation()
 
-        val direction = if (location != null && heading != null) {
+        val direction = if (location != null && heading != null && speed >= TourLogic.MIN_HEADING_SPEED_MPS) {
             TourLogic.relativeDirection(heading, GeoUtils.bearingDegrees(location, poi.latLng))
         } else {
             null
         }
+        val distancePhrase = location?.let {
+            TourLogic.distancePhrase(GeoUtils.distanceMeters(it, poi.latLng))
+        }
 
-        return "${TourLogic.narrationIntroFor(poi.name, direction)} ${content.content}"
+        return "${TourLogic.narrationIntroFor(poi.name, direction, distancePhrase)} ${content.content}"
     }
 
     /**

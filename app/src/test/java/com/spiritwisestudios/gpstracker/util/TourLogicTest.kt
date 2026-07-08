@@ -332,4 +332,43 @@ class TourLogicTest {
             TourLogic.narrationIntroFor("Fort Point", null)
         )
     }
+
+    @Test
+    fun `intro weaves in the distance when known`() {
+        assertEquals(
+            "On your right, about 200 meters: Fort Point.",
+            TourLogic.narrationIntroFor("Fort Point", TourLogic.RelativeDirection.RIGHT, "about 200 meters")
+        )
+        assertEquals(
+            "Coming up, about 300 meters: Fort Point.",
+            TourLogic.narrationIntroFor("Fort Point", null, "about 300 meters")
+        )
+    }
+
+    // --- distancePhrase ---
+
+    @Test
+    fun `very close places get no distance callout`() {
+        assertEquals(null, TourLogic.distancePhrase(0f))
+        assertEquals(null, TourLogic.distancePhrase(74f))
+    }
+
+    @Test
+    fun `near distances round to fifty meters`() {
+        assertEquals("about 150 meters", TourLogic.distancePhrase(160f))
+        assertEquals("about 100 meters", TourLogic.distancePhrase(80f))
+    }
+
+    @Test
+    fun `mid distances round to a hundred meters`() {
+        assertEquals("about 600 meters", TourLogic.distancePhrase(620f))
+        assertEquals("about 900 meters", TourLogic.distancePhrase(949f))
+    }
+
+    @Test
+    fun `far distances round to half kilometers`() {
+        assertEquals("about 1 kilometer", TourLogic.distancePhrase(1_000f))
+        assertEquals("about 1.5 kilometers", TourLogic.distancePhrase(1_600f))
+        assertEquals("about 2 kilometers", TourLogic.distancePhrase(2_050f))
+    }
 }

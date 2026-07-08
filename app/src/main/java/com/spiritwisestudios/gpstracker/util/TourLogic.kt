@@ -2,6 +2,7 @@ package com.spiritwisestudios.gpstracker.util
 
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
+import kotlin.math.roundToInt
 
 /**
  * Pure tour-mode decision logic, extracted from TourModeService so it can be
@@ -34,15 +35,56 @@ object TourLogic {
 
     /**
      * Spoken introduction for a POI narration. Falls back to a neutral
-     * phrase when the travel direction is unknown (e.g. stationary).
+     * phrase when the travel direction is unknown (e.g. stationary), and
+     * mentions the distance when one is provided ("On your right, about
+     * 300 meters: Fort Point.") so the listener knows when to look, not
+     * just where.
      */
-    fun narrationIntroFor(poiName: String, direction: RelativeDirection?): String {
-        return when (direction) {
-            RelativeDirection.AHEAD -> "Just ahead: $poiName."
-            RelativeDirection.RIGHT -> "On your right: $poiName."
-            RelativeDirection.BEHIND -> "Just behind you: $poiName."
-            RelativeDirection.LEFT -> "On your left: $poiName."
-            null -> "Coming up: $poiName."
+    fun narrationIntroFor(
+        poiName: String,
+        direction: RelativeDirection?,
+        distancePhrase: String? = null
+    ): String {
+        val lead = when (direction) {
+            RelativeDirection.AHEAD -> "Just ahead"
+            RelativeDirection.RIGHT -> "On your right"
+            RelativeDirection.BEHIND -> "Just behind you"
+            RelativeDirection.LEFT -> "On your left"
+            null -> "Coming up"
+        }
+        return if (distancePhrase != null) {
+            "$lead, $distancePhrase: $poiName."
+        } else {
+            "$lead: $poiName."
+        }
+    }
+
+    /**
+     * A distance rounded for speech. GPS and geofence jitter make precise
+     * numbers fake, so values are rounded coarsely; within 75 m a callout
+     * is noise ("you're there"), so null is returned.
+     */
+    fun distancePhrase(distanceMeters: Float): String? {
+        if (distanceMeters < 75f) return null
+        return when {
+            distanceMeters < 350f -> {
+                val rounded = (distanceMeters / 50f).roundToInt() * 50
+                "about $rounded meters"
+            }
+            distanceMeters < 950f -> {
+                val rounded = (distanceMeters / 100f).roundToInt() * 100
+                "about $rounded meters"
+            }
+            else -> {
+                // Nearest half kilometer: "about 1 kilometer", "about 1.5 kilometers"
+                val halfKmUnits = (distanceMeters / 500f).roundToInt()
+                if (halfKmUnits % 2 == 0) {
+                    val km = halfKmUnits / 2
+                    "about $km kilometer${if (km == 1) "" else "s"}"
+                } else {
+                    "about ${halfKmUnits / 2.0} kilometers"
+                }
+            }
         }
     }
 
