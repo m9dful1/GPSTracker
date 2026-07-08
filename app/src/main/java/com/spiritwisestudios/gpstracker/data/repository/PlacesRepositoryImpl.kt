@@ -30,17 +30,20 @@ class PlacesRepositoryImpl @Inject constructor(
         private const val MAX_ROUTE_POIS = 60
 
         /**
-         * Overlay locally-stored visited state onto fresh API results, which
-         * always arrive with isVisited = false.
+         * Overlay locally-stored visited state (and when it happened) onto
+         * fresh API results, which always arrive with isVisited = false.
+         * The visit timestamp rides along so the narration revisit cooldown
+         * can tell a place heard yesterday from one heard months ago.
          */
         internal fun mergeVisitedState(
             pois: List<PointOfInterest>,
-            visitedIds: Set<String>
+            visitedDates: Map<String, Long?>
         ): List<PointOfInterest> {
-            if (visitedIds.isEmpty()) return pois
+            if (visitedDates.isEmpty()) return pois
             return pois.map { poi ->
-                if (poi.id in visitedIds || poi.placeId in visitedIds) {
-                    poi.copy(isVisited = true)
+                val key = listOfNotNull(poi.id, poi.placeId).firstOrNull { it in visitedDates }
+                if (key != null) {
+                    poi.copy(isVisited = true, visitedDate = visitedDates[key])
                 } else {
                     poi
                 }
@@ -55,7 +58,7 @@ class PlacesRepositoryImpl @Inject constructor(
         try {
             val places = placesApiService.getNearbyPlaces(center, radius)
             Timber.d("Successfully fetched ${places.size} nearby places")
-            emit(mergeVisitedState(places, pointOfInterestDao.getVisitedPlaceIds().toSet()))
+            emit(mergeVisitedState(places, visitedDatesById()))
         } catch (e: Exception) {
             when (e) {
                 is SecurityException -> {
@@ -102,7 +105,11 @@ class PlacesRepositoryImpl @Inject constructor(
         }
 
         Timber.d("Found ${pois.size} places along route (${samples.size} samples)")
-        return mergeVisitedState(pois, pointOfInterestDao.getVisitedPlaceIds().toSet())
+        return mergeVisitedState(pois, visitedDatesById())
+    }
+
+    private suspend fun visitedDatesById(): Map<String, Long?> {
+        return pointOfInterestDao.getVisitedPlaceRecords().associate { it.id to it.visitedDate }
     }
 
     /**

@@ -284,6 +284,37 @@ class TourLogicTest {
         assertEquals("0 per hour — automatic narration off", TourLogic.narrationCapLabel(0))
     }
 
+    // --- shouldSkipNarration ---
+
+    @Test
+    fun `unvisited places are never skipped`() {
+        assertFalse(TourLogic.shouldSkipNarration(isVisited = false, visitedDate = null, nowMillis = now))
+        assertFalse(TourLogic.shouldSkipNarration(isVisited = false, visitedDate = now - 1L, nowMillis = now))
+    }
+
+    @Test
+    fun `recently narrated place is skipped`() {
+        val yesterday = now - 24L * 60L * 60L * 1000L
+        assertTrue(TourLogic.shouldSkipNarration(isVisited = true, visitedDate = yesterday, nowMillis = now))
+    }
+
+    @Test
+    fun `the guide's memory fades after the cooldown`() {
+        val longAgo = now - TourLogic.NARRATION_REVISIT_COOLDOWN_MS - 1L
+        assertFalse(TourLogic.shouldSkipNarration(isVisited = true, visitedDate = longAgo, nowMillis = now))
+    }
+
+    @Test
+    fun `visit exactly one cooldown old is eligible again`() {
+        val boundary = now - TourLogic.NARRATION_REVISIT_COOLDOWN_MS
+        assertFalse(TourLogic.shouldSkipNarration(isVisited = true, visitedDate = boundary, nowMillis = now))
+    }
+
+    @Test
+    fun `visited place with unknown date stays skipped`() {
+        assertTrue(TourLogic.shouldSkipNarration(isVisited = true, visitedDate = null, nowMillis = now))
+    }
+
     // --- narrationIntroFor ---
 
     @Test

@@ -97,6 +97,22 @@ object TourLogic {
     /** Sliding window for the narrations-per-hour cap. */
     const val NARRATION_WINDOW_MS = 60L * 60L * 1000L
 
+    /** How long the guide stays quiet about a place it already narrated. */
+    const val NARRATION_REVISIT_COOLDOWN_MS = 14L * 24L * 60L * 60L * 1000L
+
+    /**
+     * Whether to skip auto-narrating an already-visited place. A guide that
+     * repeats itself daily is annoying, but one that never repeats anything
+     * goes permanently silent on a commute — so narrated places become
+     * eligible again once the cooldown passes. Visited places without a
+     * timestamp stay skipped (their age is unknown).
+     */
+    fun shouldSkipNarration(isVisited: Boolean, visitedDate: Long?, nowMillis: Long): Boolean {
+        if (!isVisited) return false
+        if (visitedDate == null) return true
+        return nowMillis - visitedDate < NARRATION_REVISIT_COOLDOWN_MS
+    }
+
     /**
      * Whether another automatic narration fits under the user's hourly cap.
      * Only timestamps within the last hour count against the cap. A cap of

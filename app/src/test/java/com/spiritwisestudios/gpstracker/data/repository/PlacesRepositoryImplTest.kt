@@ -4,6 +4,7 @@ import com.google.android.gms.maps.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -20,10 +21,10 @@ class PlacesRepositoryImplTest {
     )
 
     @Test
-    fun `visited ids are overlaid onto fresh results`() {
+    fun `visited state is overlaid onto fresh results`() {
         val merged = PlacesRepositoryImpl.mergeVisitedState(
             listOf(poi("a"), poi("b"), poi("c")),
-            visitedIds = setOf("b")
+            visitedDates = mapOf("b" to 1_000L)
         )
 
         assertFalse(merged[0].isVisited)
@@ -32,25 +33,41 @@ class PlacesRepositoryImplTest {
     }
 
     @Test
-    fun `matches on placeId as well as id`() {
+    fun `visit timestamp rides along with the visited flag`() {
         val merged = PlacesRepositoryImpl.mergeVisitedState(
-            listOf(poi(id = "row-1", placeId = "google-place-1")),
-            visitedIds = setOf("google-place-1")
+            listOf(poi("a"), poi("b")),
+            visitedDates = mapOf("a" to 42_000L, "b" to null)
         )
 
-        assertTrue(merged.single().isVisited)
+        assertEquals(42_000L, merged[0].visitedDate)
+        assertTrue(merged[1].isVisited)
+        assertNull(merged[1].visitedDate)
     }
 
     @Test
-    fun `empty visited set leaves results untouched`() {
+    fun `matches on placeId as well as id`() {
+        val merged = PlacesRepositoryImpl.mergeVisitedState(
+            listOf(poi(id = "row-1", placeId = "google-place-1")),
+            visitedDates = mapOf("google-place-1" to 7_000L)
+        )
+
+        assertTrue(merged.single().isVisited)
+        assertEquals(7_000L, merged.single().visitedDate)
+    }
+
+    @Test
+    fun `empty visited map leaves results untouched`() {
         val pois = listOf(poi("a"), poi("b"))
-        assertEquals(pois, PlacesRepositoryImpl.mergeVisitedState(pois, emptySet()))
+        assertEquals(pois, PlacesRepositoryImpl.mergeVisitedState(pois, emptyMap()))
     }
 
     @Test
     fun `order and size are preserved`() {
         val pois = listOf(poi("a"), poi("b"), poi("c"))
-        val merged = PlacesRepositoryImpl.mergeVisitedState(pois, setOf("a", "c"))
+        val merged = PlacesRepositoryImpl.mergeVisitedState(
+            pois,
+            mapOf("a" to 1L, "c" to 2L)
+        )
 
         assertEquals(pois.map { it.id }, merged.map { it.id })
     }

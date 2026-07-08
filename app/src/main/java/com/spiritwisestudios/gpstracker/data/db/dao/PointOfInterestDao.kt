@@ -13,8 +13,8 @@ interface PointOfInterestDao {
     @Query("SELECT * FROM points_of_interest WHERE is_visited = 1 ORDER BY visited_date DESC")
     fun getVisitedPlaces(): Flow<List<PointOfInterestEntity>>
 
-    @Query("SELECT id FROM points_of_interest WHERE is_visited = 1")
-    suspend fun getVisitedPlaceIds(): List<String>
+    @Query("SELECT id, visited_date FROM points_of_interest WHERE is_visited = 1")
+    suspend fun getVisitedPlaceRecords(): List<VisitedPlaceRecord>
     
     @Query("SELECT * FROM points_of_interest WHERE id = :id")
     suspend fun getPointOfInterestById(id: String): PointOfInterestEntity?
@@ -30,4 +30,15 @@ interface PointOfInterestDao {
     
     @Query("DELETE FROM points_of_interest")
     suspend fun deleteAllPointsOfInterest()
-} 
+}
+
+/**
+ * Projection for the visited-state overlay: which places were narrated
+ * and when, so the revisit cooldown can be evaluated without loading
+ * full entities.
+ */
+data class VisitedPlaceRecord(
+    val id: String,
+    @ColumnInfo(name = "visited_date")
+    val visitedDate: Long?
+)
