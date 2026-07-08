@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import com.google.android.gms.maps.model.LatLng
 import com.spiritwisestudios.gpstracker.MainActivity
 import com.spiritwisestudios.gpstracker.R
+import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.TourContent
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -63,6 +65,9 @@ class TourModeService : Service() {
     @Inject
     lateinit var audioService: AudioService
 
+    @Inject
+    lateinit var userPreferencesRepository: UserPreferencesRepository
+
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val binder = TourModeServiceBinder()
 
@@ -82,6 +87,7 @@ class TourModeService : Service() {
 
     // Rolling discovery state
     private var refreshJob: Job? = null
+    private var preferencesJob: Job? = null
     private var lastFetchCenter: LatLng? = null
     private var routeCorridorActive = false
 
@@ -137,9 +143,10 @@ class TourModeService : Service() {
                 val action = intent.getStringExtra("action") ?: return START_STICKY
                 val geofenceIds = intent.getStringArrayListExtra("geofence_ids") ?: return START_STICKY
 
-                // If we were revived by a geofence event, make sure tour mode is running
+                // If we were revived by a geofence event, make sure tour mode
+                // is running (it loads the saved settings itself)
                 if (_serviceState.value !is TourModeState.Active) {
-                    startTourMode(UserPreferences())
+                    startTourMode()
                 }
 
                 // Process the geofence event
@@ -170,17 +177,30 @@ class TourModeService : Service() {
     /**
      * Start the tour mode.
      */
-    fun startTourMode(preferences: UserPreferences = UserPreferences()) {
+    fun startTourMode() {
         if (_serviceState.value is TourModeState.Active) {
             Timber.d("Tour mode already active")
             return
         }
 
-        userPreferences = preferences
-
         // Start monitoring for POIs
         serviceScope.launch {
             try {
+                // The guide works from the user's saved settings, not
+                // factory defaults — and keeps them fresh so edits in the
+                // settings sheet apply mid-tour without a restart
+                userPreferences = userPreferencesRepository.userPreferencesFlow.first()
+                preferencesJob?.cancel()
+                preferencesJob = launch {
+                    // drop(1) skips the initial replay: startup is handled
+                    // below, and reacting to it here would race the TTS init
+                    userPreferencesRepository.userPreferencesFlow.drop(1).collectLatest { prefs ->
+                        userPreferences = prefs
+                        // Idempotent once TTS is up: just updates rate/pitch
+                        audioService.initialize(prefs)
+                    }
+                }
+
                 // Initialize audio service
                 audioService.initialize(userPreferences)
 
@@ -234,9 +254,11 @@ class TourModeService : Service() {
             return
         }
 
-        // Stop discovery and proximity monitoring
+        // Stop discovery, settings tracking, and proximity monitoring
         refreshJob?.cancel()
         refreshJob = null
+        preferencesJob?.cancel()
+        preferencesJob = null
         routeCorridorActive = false
         lastFetchCenter = null
         locationAwarenessService.stopProximityMonitoring()
