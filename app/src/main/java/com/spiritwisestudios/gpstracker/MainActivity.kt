@@ -60,6 +60,8 @@ import com.spiritwisestudios.gpstracker.ui.fragment.TurnInstructionFragment
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
 import com.spiritwisestudios.gpstracker.util.AppConstants
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -111,6 +113,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     private val poiMarkers = mutableMapOf<String, Marker>()
     private val LOCATION_PERMISSION_REQUEST = 1
     private val BACKGROUND_LOCATION_PERMISSION_REQUEST = 2
+
+    // The in-flight navigation work (geocoding, then status collection),
+    // tracked so canceling actually stops it
+    private var navigationJob: Job? = null
 
     // Flag to check if this is the first location update
     private var isFirstUpdate = true
@@ -966,24 +972,35 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     
     // Start navigation to the given destination address
     private fun startNavigation(destinationAddress: String) {
-        lifecycleScope.launch {
+        navigationJob?.cancel()
+        navigationJob = lifecycleScope.launch {
             try {
-                // Show loading indicator or message
+                // Geocoding is a network call that can hang on a bad
+                // connection — show the status card immediately in a
+                // cancelable state instead of dead air
+                tvNavigationDestination.text = getString(R.string.navigating_to, destinationAddress)
                 tvNavigationInfo.text = getString(R.string.calculating_route)
-                
+                binding.btnStopNavigation.text = getString(R.string.cancel_button)
+                binding.btnStopNavigation.setOnClickListener { stopNavigation() }
+                hideDestinationInput()
+                showNavigationStatus()
+
                 // Get coordinates from the address using interface method (no casting needed)
                 val destinationLatLng = navigationService.geocodeAddress(destinationAddress)
-                
+
                 if (destinationLatLng != null) {
                     // Start common navigation setup
                     startActiveNavigation(destinationLatLng, destinationAddress)
                 } else {
                     Toast.makeText(this@MainActivity, "Could not find location: $destinationAddress", Toast.LENGTH_SHORT).show()
-                    hideDestinationInput()
+                    hideNavigationStatus()
                 }
+            } catch (e: CancellationException) {
+                throw e // cancellation is the user's doing, not an error
             } catch (e: Exception) {
                 Timber.e(e, "Error starting navigation: ${e.message}")
                 Toast.makeText(this@MainActivity, "Error starting navigation: ${e.message}", Toast.LENGTH_SHORT).show()
+                hideNavigationStatus()
             }
         }
     }
@@ -997,7 +1014,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             val displayName = place.name ?: place.address ?: "Selected destination"
             
             // Start common navigation setup
-            lifecycleScope.launch {
+            navigationJob?.cancel()
+            navigationJob = lifecycleScope.launch {
                 startActiveNavigation(destinationLatLng, displayName)
             }
         } else {
@@ -1032,9 +1050,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
                 
                 // Show a toast indicating navigation has started
                 Toast.makeText(this@MainActivity, "Navigation started to $displayName", Toast.LENGTH_SHORT).show()
-                
-                // Start collecting navigation updates
-                lifecycleScope.launch {
+
+                // Start collecting navigation updates. Tracked so that "End
+                // Navigation" (or a new destination) actually cancels the
+                // collector — including mid-route-calculation, when the
+                // Directions API is still in flight.
+                navigationJob?.cancel()
+                navigationJob = lifecycleScope.launch {
                     var corridorRouteVersion = -1
                     navigationService.startNavigation(destinationLatLng).collectLatest { status ->
                         // Also shows the next instruction when one is available
@@ -1064,6 +1086,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
                     }
                 }
             }
+        } catch (e: CancellationException) {
+            throw e // cancellation is the user's doing, not an error
         } catch (e: Exception) {
             Timber.e(e, "Error starting navigation: ${e.message}")
             Toast.makeText(this@MainActivity, "Error starting navigation: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -1291,6 +1315,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     
     // Stop navigation
     private fun stopNavigation() {
+        // Stop the in-flight work first, whether that's a geocode, a route
+        // calculation, or the live status collection
+        navigationJob?.cancel()
+        navigationJob = null
+
         isNavigating = false
         hideNavigationStatus()
         hideTurnInstructions()
