@@ -732,6 +732,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             return
         }
         mMap.isMyLocationEnabled = true
+        // The my-location layer brings its own top-right button; hide it —
+        // the recenter FAB already does this job (and re-engages following)
+        mMap.uiSettings.isMyLocationButtonEnabled = false
         startLocationUpdates()
     }
     
