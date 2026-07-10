@@ -32,12 +32,14 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.net.URLEncoder
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import android.net.ConnectivityManager
@@ -107,8 +109,8 @@ class NavigationServiceImpl @Inject constructor(
                     currentLocation = currentLatLng
                 )
                 
-                // Get route from Directions API
-                val routeResult = getRouteFromDirectionsApi(currentLatLng, destination, waypoints)
+                // Get route from Routes API
+                val routeResult = getRouteFromRoutesApi(currentLatLng, destination, waypoints)
                 
                 if (routeResult != null) {
                     // Update navigation state with calculated values and route
@@ -277,7 +279,7 @@ class NavigationServiceImpl @Inject constructor(
                 val dest = currentState.destination
                 if (dest != null) {
                     serviceScope.launch {
-                        val routeResult = getRouteFromDirectionsApi(newLocation, dest, currentState.waypoints)
+                        val routeResult = getRouteFromRoutesApi(newLocation, dest, currentState.waypoints)
                         if (routeResult != null) {
                             currentRouteVersion++
                             navigationState.value = navigationState.value.copy(
@@ -468,9 +470,10 @@ class NavigationServiceImpl @Inject constructor(
     }
     
     /**
-     * Get route information from Google Directions API
+     * Get route information from the Routes API (computeRoutes). The legacy
+     * Directions API is unavailable to new Cloud projects.
      */
-    private suspend fun getRouteFromDirectionsApi(
+    private suspend fun getRouteFromRoutesApi(
         origin: LatLng,
         destination: LatLng,
         waypoints: List<LatLng> = emptyList()
@@ -480,7 +483,7 @@ class NavigationServiceImpl @Inject constructor(
             Timber.e("No network connection available for route calculation")
             return@withContext null
         }
-        
+
         try {
             val apiKey = BuildConfig.MAPS_API_KEY
 
@@ -489,143 +492,142 @@ class NavigationServiceImpl @Inject constructor(
                 Timber.e("Google Maps API key is missing or malformed — check MAPS_API_KEY in local.properties")
                 return@withContext null
             }
-            
-            // Build the waypoints string if there are any
-            val waypointsString = if (waypoints.isNotEmpty()) {
-                "&waypoints=" + waypoints.joinToString("|") { 
-                    "${it.latitude},${it.longitude}" 
+
+            fun waypointJson(point: LatLng) = JSONObject().put(
+                "location", JSONObject().put(
+                    "latLng", JSONObject()
+                        .put("latitude", point.latitude)
+                        .put("longitude", point.longitude)
+                )
+            )
+
+            val requestJson = JSONObject().apply {
+                put("origin", waypointJson(origin))
+                put("destination", waypointJson(destination))
+                if (waypoints.isNotEmpty()) {
+                    put("intermediates", JSONArray(waypoints.map { waypointJson(it) }))
                 }
-            } else ""
-            
-            // Build the URL
-            val url = "https://maps.googleapis.com/maps/api/directions/json?" +
-                    "origin=${origin.latitude},${origin.longitude}" +
-                    "&destination=${destination.latitude},${destination.longitude}" +
-                    waypointsString +
-                    "&mode=driving" +
-                    "&key=$apiKey"
-            
-            // Log the URL without the API key
-            Timber.d("Making Directions API request: ${url.replace(apiKey, "***")}")
-            
-            // Make the request
+                put("travelMode", "DRIVE")
+                put("routingPreference", "TRAFFIC_AWARE")
+            }
+
+            Timber.d(
+                "Making Routes API request: origin=${origin.latitude},${origin.longitude} " +
+                        "destination=${destination.latitude},${destination.longitude} waypoints=${waypoints.size}"
+            )
+
+            // The field mask is required; request only what the parser reads
             val request = Request.Builder()
-                .url(url)
+                .url("https://routes.googleapis.com/directions/v2:computeRoutes")
+                .header("X-Goog-Api-Key", apiKey)
+                .header(
+                    "X-Goog-FieldMask",
+                    "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline," +
+                            "routes.legs.steps.distanceMeters,routes.legs.steps.startLocation," +
+                            "routes.legs.steps.navigationInstruction"
+                )
+                .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
                 .build()
-            
+
             httpClient.newCall(request).execute().use { response ->
-                Timber.d("Directions API response code: ${response.code}")
-                
-                if (!response.isSuccessful) {
-                    Timber.e("Directions API request failed: ${response.code} - ${response.message}")
-                    return@withContext null
-                }
-                
+                Timber.d("Routes API response code: ${response.code}")
+
                 val responseData = response.body?.string()
-                if (responseData.isNullOrEmpty()) {
-                    Timber.e("Empty response from Directions API")
+
+                if (!response.isSuccessful) {
+                    val errorMessage = responseData?.let {
+                        try {
+                            JSONObject(it).optJSONObject("error")?.optString("message")
+                        } catch (e: JSONException) {
+                            null
+                        }
+                    }
+                    Timber.e("Routes API request failed: ${response.code} - ${errorMessage ?: response.message}")
                     return@withContext null
                 }
-                
+
+                if (responseData.isNullOrEmpty()) {
+                    Timber.e("Empty response from Routes API")
+                    return@withContext null
+                }
+
                 // Log first part of the response (truncated for brevity)
-                Timber.d("Directions API raw response: ${responseData.take(500)}...")
-                
+                Timber.d("Routes API raw response: ${responseData.take(500)}...")
+
                 // Parse the response
                 val jsonResponse = JSONObject(responseData)
-                val status = jsonResponse.getString("status")
-                Timber.d("Directions API status: $status")
-                
-                if (status != "OK") {
-                    val errorMessage = if (jsonResponse.has("error_message")) {
-                        jsonResponse.getString("error_message")
-                    } else {
-                        "Unknown error"
-                    }
-                    Timber.e("Directions API returned error: $status - $errorMessage")
+                val routes = jsonResponse.optJSONArray("routes")
+
+                if (routes == null || routes.length() == 0) {
+                    Timber.e("No routes found in Routes API response")
                     return@withContext null
                 }
-                
-                // Get the first route
-                val routes = jsonResponse.getJSONArray("routes")
-                Timber.d("Directions API returned ${routes.length()} routes")
-                
-                if (routes.length() == 0) {
-                    Timber.e("No routes found in Directions API response")
-                    return@withContext null
-                }
-                
+                Timber.d("Routes API returned ${routes.length()} route(s)")
+
                 val route = routes.getJSONObject(0)
                 val legs = route.getJSONArray("legs")
                 Timber.d("First route has ${legs.length()} leg(s)")
-                
-                // Calculate total distance and duration
-                var totalDistance = 0
-                var totalDuration = 0L
+
+                val totalDistance = route.optInt("distanceMeters")
+                // Durations serialize as seconds with an "s" suffix, e.g. "1234s"
+                val totalDuration =
+                    (route.optString("duration", "0s").removeSuffix("s").toDouble() * 1000).toLong()
+
                 val instructions = mutableListOf<NavigationService.NavigationInstruction>()
-                
-                // Process each leg of the journey
+
                 for (i in 0 until legs.length()) {
-                    val leg = legs.getJSONObject(i)
-                    
-                    // Get distance and duration
-                    val distance = leg.getJSONObject("distance").getInt("value")
-                    val duration = leg.getJSONObject("duration").getInt("value") * 1000L // Convert to milliseconds
-                    
-                    totalDistance += distance
-                    totalDuration += duration
-                    
-                    // Get steps (instructions)
-                    val steps = leg.getJSONArray("steps")
+                    val steps = legs.getJSONObject(i).getJSONArray("steps")
                     for (j in 0 until steps.length()) {
                         val step = steps.getJSONObject(j)
-                        val stepDistance = step.getJSONObject("distance").getInt("value")
-                        val instruction = step.getString("html_instructions")
-                            .replace("<[^>]*>".toRegex(), " ") // Remove HTML tags
-                            .replace("\\s+".toRegex(), " ") // Replace multiple spaces with a single space
+
+                        // Steps without an instruction (plain continuations) are skipped
+                        val navigationInstruction = step.optJSONObject("navigationInstruction") ?: continue
+                        val description = navigationInstruction.optString("instructions")
+                            .replace("\\s+".toRegex(), " ") // Instructions can span multiple lines
                             .trim()
-                            
+
                         // Get maneuver point
-                        val startLocation = step.getJSONObject("start_location")
+                        val startLatLng = step.getJSONObject("startLocation").getJSONObject("latLng")
                         val maneuverPoint = LatLng(
-                            startLocation.getDouble("lat"),
-                            startLocation.getDouble("lng")
+                            startLatLng.getDouble("latitude"),
+                            startLatLng.getDouble("longitude")
                         )
-                        
+
                         // Determine instruction type
-                        val maneuver = if (step.has("maneuver")) step.getString("maneuver") else "straight"
-                        val instructionType = when (maneuver) {
-                            "turn-left" -> NavigationService.InstructionType.TURN_LEFT
-                            "turn-right" -> NavigationService.InstructionType.TURN_RIGHT
-                            "turn-slight-left" -> NavigationService.InstructionType.TURN_SLIGHT_LEFT
-                            "turn-slight-right" -> NavigationService.InstructionType.TURN_SLIGHT_RIGHT
-                            "turn-sharp-left" -> NavigationService.InstructionType.TURN_SHARP_LEFT
-                            "turn-sharp-right" -> NavigationService.InstructionType.TURN_SHARP_RIGHT
-                            "roundabout-left", "roundabout-right", "rotary" -> NavigationService.InstructionType.ROUNDABOUT
-                            "merge" -> NavigationService.InstructionType.MERGE
-                            "ramp-left", "ramp-right" -> NavigationService.InstructionType.HIGHWAY_EXIT
-                            "ferry", "ferry-train" -> NavigationService.InstructionType.OTHER
+                        val instructionType = when (navigationInstruction.optString("maneuver")) {
+                            "TURN_LEFT" -> NavigationService.InstructionType.TURN_LEFT
+                            "TURN_RIGHT" -> NavigationService.InstructionType.TURN_RIGHT
+                            "TURN_SLIGHT_LEFT", "FORK_LEFT" -> NavigationService.InstructionType.TURN_SLIGHT_LEFT
+                            "TURN_SLIGHT_RIGHT", "FORK_RIGHT" -> NavigationService.InstructionType.TURN_SLIGHT_RIGHT
+                            "TURN_SHARP_LEFT", "UTURN_LEFT" -> NavigationService.InstructionType.TURN_SHARP_LEFT
+                            "TURN_SHARP_RIGHT", "UTURN_RIGHT" -> NavigationService.InstructionType.TURN_SHARP_RIGHT
+                            "ROUNDABOUT_LEFT", "ROUNDABOUT_RIGHT" -> NavigationService.InstructionType.ROUNDABOUT
+                            "MERGE" -> NavigationService.InstructionType.MERGE
+                            "RAMP_LEFT", "RAMP_RIGHT" -> NavigationService.InstructionType.HIGHWAY_EXIT
+                            "DEPART" -> NavigationService.InstructionType.DEPART
+                            "FERRY", "FERRY_TRAIN" -> NavigationService.InstructionType.OTHER
                             else -> NavigationService.InstructionType.STRAIGHT
                         }
-                        
+
                         // Add to instructions list
                         instructions.add(
                             NavigationService.NavigationInstruction(
                                 type = instructionType,
-                                distance = stepDistance.toFloat(),
-                                description = instruction,
+                                distance = step.optInt("distanceMeters").toFloat(),
+                                description = description,
                                 maneuverPoint = maneuverPoint
                             )
                         )
                     }
                 }
-                
+
                 // Decode the polyline
-                val overviewPolyline = route.getJSONObject("overview_polyline").getString("points")
-                val polylinePoints = Polyline.decode(overviewPolyline)
-                
+                val encodedPolyline = route.getJSONObject("polyline").getString("encodedPolyline")
+                val polylinePoints = Polyline.decode(encodedPolyline)
+
                 // Before returning the route result
-                Timber.d("Successfully parsed route with ${polylinePoints.size} points, distance: ${totalDistance}m, duration: ${totalDuration}ms")
-                
+                Timber.d("Successfully parsed route with ${polylinePoints.size} points, distance: ${totalDistance}m, duration: ${totalDuration}ms, ${instructions.size} instructions")
+
                 return@withContext RouteResult(
                     route = polylinePoints,
                     distance = totalDistance.toFloat(),
@@ -637,7 +639,7 @@ class NavigationServiceImpl @Inject constructor(
             Timber.e(e, "Network error when fetching route: ${e.message}")
             return@withContext null
         } catch (e: JSONException) {
-            Timber.e(e, "Error parsing Directions API response: ${e.message}")
+            Timber.e(e, "Error parsing Routes API response: ${e.message}")
             return@withContext null
         } catch (e: Exception) {
             Timber.e(e, "Unexpected error getting route: ${e.message}")

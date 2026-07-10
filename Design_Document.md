@@ -1,7 +1,7 @@
 # GPS Tracker App Design Document
 
 ## Overview
-The GPS Tracker is an Android application that tracks and displays the user's real-time location on a Google Map. It has been expanded to function as a city tour guide, providing information about nearby points of interest, and now includes turn-by-turn navigation. The app utilizes the device's GPS, the Google Places API, and the Google Directions API to obtain location data, nearby places, and routing information, then displays them on the map with interactive elements and voice guidance.
+The GPS Tracker is an Android application that tracks and displays the user's real-time location on a Google Map. It has been expanded to function as a city tour guide, providing information about nearby points of interest, and now includes turn-by-turn navigation. The app utilizes the device's GPS, the Google Places API (New), and the Google Routes API to obtain location data, nearby places, and routing information, then displays them on the map with interactive elements and voice guidance.
 
 API keys live in `local.properties` (gitignored) as `MAPS_API_KEY`. Gradle injects the value into the manifest meta-data entry the Maps SDK reads, and into `BuildConfig.MAPS_API_KEY` for the Places SDK and web-service calls. See `app/docs/api_key_setup.md`.
 
@@ -266,7 +266,7 @@ Narration content comes from Wikipedia: the app geosearches for the article matc
   ```
   `TourContentRepository` is now a thin facade over `ContentService` for the UI layer (the old duplicate mock generator was removed).
 
-- `NavigationServiceImpl.kt`: Implementation of NavigationService using Google Directions API and location updates
+- `NavigationServiceImpl.kt`: Implementation of NavigationService using the Google Routes API and location updates
   ```kotlin
   class NavigationServiceImpl @Inject constructor(private val context: Context) : NavigationService {
       override fun startNavigation(destination: LatLng, waypoints: List<LatLng>): Flow<NavigationService.NavigationStatus> { /*...*/ }
@@ -280,7 +280,7 @@ Narration content comes from Wikipedia: the app geosearches for the article matc
       override fun isNavigating(): Boolean { /*...*/ }
       override suspend fun geocodeAddress(address: String): LatLng? { /*...*/ }
       
-      private suspend fun getRouteFromDirectionsApi(origin: LatLng, destination: LatLng, waypoints: List<LatLng>): RouteResult? { /*...*/ }
+      private suspend fun getRouteFromRoutesApi(origin: LatLng, destination: LatLng, waypoints: List<LatLng>): RouteResult? { /*...*/ }
       private fun decodePolyline(encoded: String): List<LatLng> { /*...*/ }
       private fun setupLocationUpdates(emitStatus: (NavigationService.NavigationStatus) -> Unit) { /*...*/ }
       private fun stopLocationUpdates() { /*...*/ }
@@ -526,7 +526,7 @@ The app now includes a tour mode feature that continues to monitor location and 
     -   Launches a coroutine to collect from `navigationService.startNavigation()`.
 7.  `NavigationServiceImpl.startNavigation()`:
     -   Gets current location.
-    -   Calls `getRouteFromDirectionsApi()` to fetch route and instructions.
+    -   Calls `getRouteFromRoutesApi()` to fetch route and instructions.
     -   Updates internal state (`navigationState`).
     -   Emits initial `NavigationStatus`.
     -   Calls `setupLocationUpdates()` to start receiving location updates.
@@ -777,8 +777,8 @@ The app now includes a tour mode feature that continues to monitor location and 
 - `NavigationServiceImpl` uses `FusedLocationProviderClient` to receive location updates via `locationCallback`.
 - `locationCallback` triggers `updateNavigation()` which recalculates state and emits new `NavigationStatus`.
 
-### NavigationServiceImpl and Directions API
-- `NavigationServiceImpl.getRouteFromDirectionsApi()` uses `OkHttpClient` to call the Google Directions API.
+### NavigationServiceImpl and Routes API
+- `NavigationServiceImpl.getRouteFromRoutesApi()` uses `OkHttpClient` to POST to the Google Routes API (`computeRoutes`). The legacy Directions API is unavailable to new Cloud projects.
 - Parses JSON response to extract route polyline and step-by-step instructions (`NavigationInstruction`).
 
 ### GeofenceBroadcastReceiver and TourModeService
