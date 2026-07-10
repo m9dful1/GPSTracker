@@ -336,12 +336,12 @@ class TourLogicTest {
     @Test
     fun `intro weaves in the distance when known`() {
         assertEquals(
-            "On your right, about 200 meters: Fort Point.",
-            TourLogic.narrationIntroFor("Fort Point", TourLogic.RelativeDirection.RIGHT, "about 200 meters")
+            "On your right, about 500 feet: Fort Point.",
+            TourLogic.narrationIntroFor("Fort Point", TourLogic.RelativeDirection.RIGHT, "about 500 feet")
         )
         assertEquals(
-            "Coming up, about 300 meters: Fort Point.",
-            TourLogic.narrationIntroFor("Fort Point", null, "about 300 meters")
+            "Coming up, about 1000 feet: Fort Point.",
+            TourLogic.narrationIntroFor("Fort Point", null, "about 1000 feet")
         )
     }
 
@@ -354,21 +354,22 @@ class TourLogicTest {
     }
 
     @Test
-    fun `near distances round to fifty meters`() {
-        assertEquals("about 150 meters", TourLogic.distancePhrase(160f))
-        assertEquals("about 100 meters", TourLogic.distancePhrase(80f))
+    fun `near distances round to a hundred feet`() {
+        assertEquals("about 500 feet", TourLogic.distancePhrase(160f))
+        assertEquals("about 300 feet", TourLogic.distancePhrase(80f))
     }
 
     @Test
-    fun `mid distances round to a hundred meters`() {
-        assertEquals("about 600 meters", TourLogic.distancePhrase(620f))
-        assertEquals("about 900 meters", TourLogic.distancePhrase(949f))
+    fun `mid distances round to quarter miles`() {
+        assertEquals("about a quarter mile", TourLogic.distancePhrase(400f))
+        assertEquals("about half a mile", TourLogic.distancePhrase(800f))
+        assertEquals("about three quarters of a mile", TourLogic.distancePhrase(1_200f))
     }
 
     @Test
-    fun `far distances round to half kilometers`() {
-        assertEquals("about 1 kilometer", TourLogic.distancePhrase(1_000f))
-        assertEquals("about 1.5 kilometers", TourLogic.distancePhrase(1_600f))
-        assertEquals("about 2 kilometers", TourLogic.distancePhrase(2_050f))
+    fun `far distances round to half miles`() {
+        assertEquals("about 1 mile", TourLogic.distancePhrase(1_600f))
+        assertEquals("about 1.5 miles", TourLogic.distancePhrase(2_400f))
+        assertEquals("about 2 miles", TourLogic.distancePhrase(3_200f))
     }
 }

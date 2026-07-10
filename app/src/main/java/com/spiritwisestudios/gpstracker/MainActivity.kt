@@ -60,6 +60,7 @@ import com.spiritwisestudios.gpstracker.ui.fragment.TurnInstructionFragment
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
 import com.spiritwisestudios.gpstracker.util.AppConstants
 import com.spiritwisestudios.gpstracker.util.CameraLogic
+import com.spiritwisestudios.gpstracker.util.DistanceFormatter
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -1217,10 +1218,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     // Update the navigation status UI
     private fun updateNavigationStatus(status: NavigationService.NavigationStatus, destinationName: String) {
         // Format distance
-        val distanceText = when {
-            status.distanceRemaining >= 1000 -> String.format("%.1f km", status.distanceRemaining / 1000)
-            else -> String.format("%d m", status.distanceRemaining.toInt())
-        }
+        val distanceText = DistanceFormatter.format(status.distanceRemaining)
         
         // Format ETA
         val etaText = if (status.timeRemaining > 0) {
@@ -1297,10 +1295,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         val details = navigationService.getManeuverDetails(instruction)
         
         // Format distance for voice
-        val distanceText = when {
-            instruction.distance >= 1000 -> String.format("%.1f kilometers", instruction.distance / 1000)
-            else -> String.format("%d meters", instruction.distance.toInt())
-        }
+        val distanceText = DistanceFormatter.spoken(instruction.distance)
         
         // Format based on timing
         return when (timing) {

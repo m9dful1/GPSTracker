@@ -46,6 +46,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import org.json.JSONException
 import com.spiritwisestudios.gpstracker.BuildConfig
+import com.spiritwisestudios.gpstracker.util.DistanceFormatter
 import com.spiritwisestudios.gpstracker.util.Polyline
 import java.io.IOException
 import android.graphics.Color
@@ -509,6 +510,7 @@ class NavigationServiceImpl @Inject constructor(
                 }
                 put("travelMode", "DRIVE")
                 put("routingPreference", "TRAFFIC_AWARE")
+                put("units", "IMPERIAL")
             }
 
             Timber.d(
@@ -831,10 +833,7 @@ class NavigationServiceImpl @Inject constructor(
         }
         
         // Format distance for human-friendly display
-        val distanceText = when {
-            instruction.distance >= 1000 -> String.format("%.1f km", instruction.distance / 1000)
-            else -> String.format("%d m", instruction.distance.toInt())
-        }
+        val distanceText = DistanceFormatter.format(instruction.distance)
         
         // Primary instruction (main directive)
         val primaryInstruction = when (instruction.type) {

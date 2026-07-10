@@ -10,6 +10,7 @@ import android.widget.TextView
 import androidx.fragment.app.Fragment
 import com.spiritwisestudios.gpstracker.R
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
+import com.spiritwisestudios.gpstracker.util.DistanceFormatter
 
 /**
  * Fragment that displays turn-by-turn navigation instructions.
@@ -134,11 +135,7 @@ class TurnInstructionFragment : Fragment() {
             }
             
             // Format distance
-            val distanceText = when {
-                instruction.distance >= 1000 -> String.format("%.1f km", instruction.distance / 1000)
-                else -> String.format("%d m", instruction.distance.toInt())
-            }
-            distanceView.text = distanceText
+            distanceView.text = DistanceFormatter.format(instruction.distance)
             
             // Update progress based on announcement timing
             val progress = when (announcementTiming) {

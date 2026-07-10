@@ -19,6 +19,7 @@ import com.spiritwisestudios.gpstracker.R
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
+import com.spiritwisestudios.gpstracker.util.DistanceFormatter
 import com.spiritwisestudios.gpstracker.util.TourLogic
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -167,7 +168,7 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         // Notification Distance SeekBar
         seekBarNotifyDistance.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                tvNotifyDistanceValue.text = "${progress}m"
+                tvNotifyDistanceValue.text = DistanceFormatter.format(progress.toFloat())
             }
             
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -241,7 +242,7 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         
         // Notification Settings
         seekBarNotifyDistance.progress = preferences.notifyDistance
-        tvNotifyDistanceValue.text = "${preferences.notifyDistance}m"
+        tvNotifyDistanceValue.text = DistanceFormatter.format(preferences.notifyDistance.toFloat())
         
         seekBarMaxNotifications.progress = preferences.maxNotificationsPerHour
         tvMaxNotificationsValue.text = TourLogic.narrationCapLabel(preferences.maxNotificationsPerHour)

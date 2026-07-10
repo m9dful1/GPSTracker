@@ -37,7 +37,7 @@ object TourLogic {
      * Spoken introduction for a POI narration. Falls back to a neutral
      * phrase when the travel direction is unknown (e.g. stationary), and
      * mentions the distance when one is provided ("On your right, about
-     * 300 meters: Fort Point.") so the listener knows when to look, not
+     * 500 feet: Fort Point.") so the listener knows when to look, not
      * just where.
      */
     fun narrationIntroFor(
@@ -60,29 +60,33 @@ object TourLogic {
     }
 
     /**
-     * A distance rounded for speech. GPS and geofence jitter make precise
-     * numbers fake, so values are rounded coarsely; within 75 m a callout
-     * is noise ("you're there"), so null is returned.
+     * A distance rounded for speech, in imperial units. GPS and geofence
+     * jitter make precise numbers fake, so values are rounded coarsely;
+     * within 75 m (~250 ft) a callout is noise ("you're there"), so null
+     * is returned.
      */
     fun distancePhrase(distanceMeters: Float): String? {
         if (distanceMeters < 75f) return null
+        val feet = distanceMeters * 3.28084f
+        val miles = distanceMeters / 1609.344f
         return when {
-            distanceMeters < 350f -> {
-                val rounded = (distanceMeters / 50f).roundToInt() * 50
-                "about $rounded meters"
+            feet < 1000f -> {
+                val rounded = (feet / 100f).roundToInt() * 100
+                "about $rounded feet"
             }
-            distanceMeters < 950f -> {
-                val rounded = (distanceMeters / 100f).roundToInt() * 100
-                "about $rounded meters"
+            miles < 0.875f -> when ((miles * 4f).roundToInt()) {
+                1 -> "about a quarter mile"
+                2 -> "about half a mile"
+                else -> "about three quarters of a mile"
             }
             else -> {
-                // Nearest half kilometer: "about 1 kilometer", "about 1.5 kilometers"
-                val halfKmUnits = (distanceMeters / 500f).roundToInt()
-                if (halfKmUnits % 2 == 0) {
-                    val km = halfKmUnits / 2
-                    "about $km kilometer${if (km == 1) "" else "s"}"
+                // Nearest half mile: "about 1 mile", "about 1.5 miles"
+                val halfMileUnits = (miles * 2f).roundToInt()
+                if (halfMileUnits % 2 == 0) {
+                    val wholeMiles = halfMileUnits / 2
+                    "about $wholeMiles mile${if (wholeMiles == 1) "" else "s"}"
                 } else {
-                    "about ${halfKmUnits / 2.0} kilometers"
+                    "about ${halfMileUnits / 2.0} miles"
                 }
             }
         }
