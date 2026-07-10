@@ -18,6 +18,7 @@
         android:layout_marginEnd="16dp"
         android:layout_marginBottom="88dp"
         android:contentDescription="@string/tour_mode_fab_description"
+        app:layout_dodgeInsetEdges="bottom"
         app:srcCompat="@android:drawable/ic_dialog_map" />
         
     <com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -28,6 +29,7 @@
         android:layout_marginStart="16dp"
         android:layout_marginBottom="16dp"
         android:contentDescription="@string/enter_destination"
+        app:layout_dodgeInsetEdges="bottom"
         app:srcCompat="@android:drawable/ic_menu_mylocation" />
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -38,6 +40,7 @@
         android:layout_marginStart="16dp"
         android:layout_marginBottom="88dp"
         android:contentDescription="Map layers"
+        app:layout_dodgeInsetEdges="bottom"
         app:srcCompat="@android:drawable/ic_menu_mapmode" />
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -48,6 +51,7 @@
         android:layout_marginStart="16dp"
         android:layout_marginBottom="160dp"
         android:contentDescription="Tour journal"
+        app:layout_dodgeInsetEdges="bottom"
         app:srcCompat="@android:drawable/ic_menu_recent_history" />
 
     <!-- Top column: search bar plus every card anchored to the top edge,
@@ -195,13 +199,16 @@
     </LinearLayout>
 
 
-    <!-- Bottom cards: the fact card stacks above the navigation card -->
+    <!-- Bottom cards: the fact card stacks above the navigation card.
+         The cards inset the bottom edge so the FABs (which dodge it)
+         slide up above them instead of overlapping. -->
     <LinearLayout
         android:id="@+id/bottom_cards"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        app:layout_insetEdge="bottom">
 
         <!-- Fact card shown while a point of interest is being narrated -->
         <androidx.cardview.widget.CardView
