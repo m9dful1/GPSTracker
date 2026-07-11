@@ -560,8 +560,13 @@ class TourModeService : Service() {
             // Get or generate content
             val content = contentService.getContentForPlace(poi, effectivePreferences)
 
-            // Calculate content priority (user prefs, rating, alert proximity)
-            val calculatedPriority = TourLogic.contentPriorityFor(poi, userPreferences, priority)
+            // Calculate content priority (category interest, user prefs,
+            // rating, alert proximity, and whether there are real facts:
+            // places with a story outrank bare map pins in the queue)
+            val hasRichContent = content.source == TourContent.ContentSource.AI_GENERATED ||
+                content.source == TourContent.ContentSource.THIRD_PARTY
+            val calculatedPriority =
+                TourLogic.contentPriorityFor(poi, userPreferences, priority, hasRichContent)
 
             // Queue for delivery; only accepted narrations count toward the cap
             if (contentService.queueContentForDelivery(content, calculatedPriority)) {

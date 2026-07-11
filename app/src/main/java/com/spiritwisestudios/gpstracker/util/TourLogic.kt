@@ -220,16 +220,41 @@ object TourLogic {
     }
 
     /**
+     * A category's intrinsic tour-worthiness. When several places are in
+     * range at once, a guide talks about the Civil War fort, not the
+     * sandwich shop next to it.
+     */
+    fun categoryInterestWeight(category: String): Int {
+        return when (category.uppercase()) {
+            "HISTORICAL", "CULTURAL" -> 3
+            "NATURAL", "ARCHITECTURAL" -> 2
+            "ENTERTAINMENT" -> 1
+            else -> 0
+        }
+    }
+
+    /**
      * Calculate content delivery priority for a POI. Higher means sooner.
-     * Combines the alert-based base priority with rating, user category
-     * preferences, and whether the place was already visited.
+     * Combines the alert-based base priority with the category's intrinsic
+     * interest, rating, user category preferences, whether real facts exist
+     * to tell ([hasRichContent] — a documented place beats a bare map pin),
+     * and whether the place was already visited.
      */
     fun contentPriorityFor(
         poi: PointOfInterest,
         preferences: UserPreferences,
-        basePriority: Int
+        basePriority: Int,
+        hasRichContent: Boolean = false
     ): Int {
         var priority = basePriority
+
+        // Landmarks outrank lunch spots
+        priority += categoryInterestWeight(poi.category)
+
+        // Places with a real story to tell beat bare map pins
+        if (hasRichContent) {
+            priority += 2
+        }
 
         // POI rating (0-5 scale, add 0-3 priority points)
         poi.rating?.let { rating ->

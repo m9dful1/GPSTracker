@@ -62,13 +62,14 @@ class TourLogicTest {
     @Test
     fun `high rating adds three points`() {
         val prefs = UserPreferences(preferredCategories = emptySet())
-        assertEquals(3, TourLogic.contentPriorityFor(poi(rating = 4.8), prefs, 0))
+        // SHOPPING carries no intrinsic category weight, isolating the rating
+        assertEquals(3, TourLogic.contentPriorityFor(poi(category = "SHOPPING", rating = 4.8), prefs, 0))
     }
 
     @Test
     fun `preferred category adds two points`() {
-        val prefs = UserPreferences(preferredCategories = setOf(PointOfInterest.Category.CULTURAL))
-        assertEquals(2, TourLogic.contentPriorityFor(poi(category = "CULTURAL"), prefs, 0))
+        val prefs = UserPreferences(preferredCategories = setOf(PointOfInterest.Category.SHOPPING))
+        assertEquals(2, TourLogic.contentPriorityFor(poi(category = "SHOPPING"), prefs, 0))
     }
 
     @Test
@@ -82,7 +83,36 @@ class TourLogicTest {
     @Test
     fun `priority never drops below zero`() {
         val prefs = UserPreferences(preferredCategories = emptySet())
-        assertEquals(0, TourLogic.contentPriorityFor(poi(isVisited = true), prefs, 0))
+        assertEquals(0, TourLogic.contentPriorityFor(poi(category = "SHOPPING", isVisited = true), prefs, 0))
+    }
+
+    @Test
+    fun `landmarks outrank lunch spots`() {
+        val prefs = UserPreferences(preferredCategories = emptySet())
+        val fort = TourLogic.contentPriorityFor(poi(category = "HISTORICAL"), prefs, 0)
+        val sandwichShop = TourLogic.contentPriorityFor(poi(category = "DINING"), prefs, 0)
+        assertTrue(fort > sandwichShop)
+    }
+
+    @Test
+    fun `a place with real facts outranks a bare map pin`() {
+        val prefs = UserPreferences(preferredCategories = emptySet())
+        val documented = TourLogic.contentPriorityFor(poi(), prefs, 0, hasRichContent = true)
+        val barePin = TourLogic.contentPriorityFor(poi(), prefs, 0, hasRichContent = false)
+        assertTrue(documented > barePin)
+    }
+
+    @Test
+    fun `category interest weights rank guide-worthiness`() {
+        assertTrue(
+            TourLogic.categoryInterestWeight("HISTORICAL") >
+                TourLogic.categoryInterestWeight("ENTERTAINMENT")
+        )
+        assertTrue(
+            TourLogic.categoryInterestWeight("ENTERTAINMENT") >
+                TourLogic.categoryInterestWeight("SHOPPING")
+        )
+        assertEquals(0, TourLogic.categoryInterestWeight("no-such-category"))
     }
 
     @Test

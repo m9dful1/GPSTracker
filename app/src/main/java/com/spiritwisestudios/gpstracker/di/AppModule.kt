@@ -1,6 +1,8 @@
 package com.spiritwisestudios.gpstracker.di
 
 import android.content.Context
+import com.spiritwisestudios.gpstracker.BuildConfig
+import com.spiritwisestudios.gpstracker.data.api.GeminiApiService
 import com.spiritwisestudios.gpstracker.data.api.GeocodingApiService
 import com.spiritwisestudios.gpstracker.data.api.PlacesApiService
 import com.spiritwisestudios.gpstracker.data.api.RoutingApiService
@@ -72,6 +74,14 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideGeminiApiService(okHttpClient: OkHttpClient): GeminiApiService {
+        // Blank when no GEMINI_API_KEY is in local.properties; the service
+        // then declines every request and narration falls back to Wikipedia
+        return GeminiApiService(okHttpClient, BuildConfig.GEMINI_API_KEY)
+    }
+
+    @Provides
+    @Singleton
     fun provideRoutingApiService(okHttpClient: OkHttpClient): RoutingApiService {
         return RoutingApiService(okHttpClient)
     }
@@ -113,10 +123,13 @@ object AppModule {
     @Singleton
     fun provideContentService(
         wikipediaApiService: WikipediaApiService,
+        geminiApiService: GeminiApiService,
         tourContentDao: TourContentDao,
         connectivityChecker: ConnectivityChecker
     ): ContentService {
-        return ContentServiceImpl(wikipediaApiService, tourContentDao, connectivityChecker)
+        return ContentServiceImpl(
+            wikipediaApiService, geminiApiService, tourContentDao, connectivityChecker
+        )
     }
 
     @Provides

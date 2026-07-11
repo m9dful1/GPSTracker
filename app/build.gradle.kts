@@ -1,8 +1,22 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.jetbrainsKotlinAndroid)
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
+}
+
+// Optional: a free Google AI Studio key (https://aistudio.google.com/apikey)
+// in local.properties as GEMINI_API_KEY=... switches tour narration to
+// AI-written scripts — see app/docs/ai_narration.md. Without it the app
+// narrates straight from Wikipedia. Never commit the key.
+val geminiApiKey: String = Properties().let { props ->
+    val localProperties = rootProject.file("local.properties")
+    if (localProperties.exists()) {
+        localProperties.inputStream().use { props.load(it) }
+    }
+    props.getProperty("GEMINI_API_KEY") ?: ""
 }
 
 android {
@@ -17,6 +31,8 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
     }
 
     buildTypes {
