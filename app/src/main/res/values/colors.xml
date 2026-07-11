@@ -2,7 +2,12 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="colorPrimary">#6200EE</color>
-    <color name="colorPrimaryDark">#3700B3</color>
-    <color name="colorAccent">#03DAC5</color>
+
+    <!-- Brand palette: deep teal with a matching light variant for dark
+         theme (values-night/colors.xml overrides these). -->
+    <color name="brand_primary">#00695C</color>
+    <color name="brand_primary_variant">#004D40</color>
+    <color name="brand_on_primary">#FFFFFFFF</color>
+    <color name="brand_secondary">#00897B</color>
+    <color name="brand_on_secondary">#FFFFFFFF</color>
 </resources>

@@ -8,14 +8,14 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Map layers"
+        android:text="@string/map_layers_title"
         android:textAppearance="?attr/textAppearanceHeadline6" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:text="Map style"
+        android:text="@string/map_style"
         android:textAppearance="?attr/textAppearanceSubtitle2" />
 
     <RadioGroup
@@ -28,29 +28,29 @@
             android:id="@+id/rb_map_default"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="44dp"
-            android:text="Default" />
+            android:minHeight="48dp"
+            android:text="@string/map_style_default" />
 
         <RadioButton
             android:id="@+id/rb_map_bright"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="44dp"
-            android:text="Bright" />
+            android:minHeight="48dp"
+            android:text="@string/map_style_bright" />
 
         <RadioButton
             android:id="@+id/rb_map_minimal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="44dp"
-            android:text="Minimal" />
+            android:minHeight="48dp"
+            android:text="@string/map_style_minimal" />
 
         <RadioButton
             android:id="@+id/rb_map_dark"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="44dp"
-            android:text="Dark" />
+            android:minHeight="48dp"
+            android:text="@string/map_style_dark" />
     </RadioGroup>
 
 </LinearLayout>

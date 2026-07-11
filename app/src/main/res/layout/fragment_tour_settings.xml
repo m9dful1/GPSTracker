@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:padding="16dp">
@@ -13,72 +13,70 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Tour Mode Settings"
-            android:textSize="24sp"
-            android:textStyle="bold"
+            android:text="@string/tour_settings_title"
+            android:textAppearance="?attr/textAppearanceHeadline5"
             android:layout_marginBottom="16dp" />
 
         <!-- Content Preferences Section -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Content Preferences"
-            android:textSize="18sp"
-            android:textStyle="bold"
+            android:text="@string/content_preferences"
+            android:textAppearance="?attr/textAppearanceHeadline6"
             android:layout_marginTop="8dp"
             android:layout_marginBottom="8dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Points of Interest Categories" />
+            android:text="@string/poi_categories" />
 
         <CheckBox
             android:id="@+id/cb_category_historical"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Historical" />
+            android:text="@string/category_historical" />
 
         <CheckBox
             android:id="@+id/cb_category_cultural"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Cultural" />
+            android:text="@string/category_cultural" />
 
         <CheckBox
             android:id="@+id/cb_category_natural"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Natural" />
-            
+            android:text="@string/category_natural" />
+
         <CheckBox
             android:id="@+id/cb_category_architectural"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Architectural" />
+            android:text="@string/category_architectural" />
 
         <CheckBox
             android:id="@+id/cb_category_entertainment"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Entertainment" />
+            android:text="@string/category_entertainment" />
 
         <CheckBox
             android:id="@+id/cb_category_dining"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Dining" />
+            android:text="@string/category_dining" />
 
         <CheckBox
             android:id="@+id/cb_category_shopping"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Shopping" />
+            android:text="@string/category_shopping" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Content Detail Level"
+            android:text="@string/content_detail_level"
             android:layout_marginTop="8dp" />
 
         <RadioGroup
@@ -92,14 +90,14 @@
                 android:id="@+id/rb_detail_brief"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Brief"
+                android:text="@string/detail_brief"
                 android:layout_weight="1" />
 
             <RadioButton
                 android:id="@+id/rb_detail_medium"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Medium"
+                android:text="@string/detail_medium"
                 android:checked="true"
                 android:layout_weight="1" />
 
@@ -107,7 +105,7 @@
                 android:id="@+id/rb_detail_detailed"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Detailed"
+                android:text="@string/detail_detailed"
                 android:layout_weight="1" />
         </RadioGroup>
 
@@ -115,24 +113,22 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Audio Settings"
-            android:textSize="18sp"
-            android:textStyle="bold"
+            android:text="@string/audio_settings"
+            android:textAppearance="?attr/textAppearanceHeadline6"
             android:layout_marginTop="16dp"
             android:layout_marginBottom="8dp" />
 
-        <Switch
+        <com.google.android.material.switchmaterial.SwitchMaterial
             android:id="@+id/switch_audio_enabled"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Audio Narration Enabled"
-            android:checked="true"
-            android:switchMinWidth="56dp" />
+            android:text="@string/audio_narration_enabled"
+            android:checked="true" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Voice Speed"
+            android:text="@string/voice_speed"
             android:layout_marginTop="8dp" />
 
         <SeekBar
@@ -146,13 +142,13 @@
             android:id="@+id/tv_voice_speed_value"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="1.0x"
-            android:gravity="center" />
+            android:gravity="center"
+            tools:text="1.0x" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Voice Pitch"
+            android:text="@string/voice_pitch"
             android:layout_marginTop="8dp" />
 
         <SeekBar
@@ -166,32 +162,30 @@
             android:id="@+id/tv_voice_pitch_value"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="1.0x"
-            android:gravity="center" />
+            android:gravity="center"
+            tools:text="1.0x" />
 
-        <Switch
+        <com.google.android.material.switchmaterial.SwitchMaterial
             android:id="@+id/switch_auto_play"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Auto-play Content When Approaching POIs"
+            android:text="@string/auto_play_content"
             android:checked="true"
-            android:switchMinWidth="56dp"
             android:layout_marginTop="8dp" />
 
         <!-- Notification Settings Section -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Notification Settings"
-            android:textSize="18sp"
-            android:textStyle="bold"
+            android:text="@string/notification_settings"
+            android:textAppearance="?attr/textAppearanceHeadline6"
             android:layout_marginTop="16dp"
             android:layout_marginBottom="8dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Notification Distance (meters)" />
+            android:text="@string/notification_distance" />
 
         <SeekBar
             android:id="@+id/seekbar_notify_distance"
@@ -204,13 +198,13 @@
             android:id="@+id/tv_notify_distance_value"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="200m"
-            android:gravity="center" />
+            android:gravity="center"
+            tools:text="660 ft" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Max Notifications Per Hour"
+            android:text="@string/max_notifications_per_hour"
             android:layout_marginTop="8dp" />
 
         <SeekBar
@@ -224,34 +218,31 @@
             android:id="@+id/tv_max_notifications_value"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="10 per hour"
-            android:gravity="center" />
+            android:gravity="center"
+            tools:text="10 per hour" />
 
         <!-- Battery Usage Section -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Battery Usage"
-            android:textSize="18sp"
-            android:textStyle="bold"
+            android:text="@string/battery_usage"
+            android:textAppearance="?attr/textAppearanceHeadline6"
             android:layout_marginTop="16dp"
             android:layout_marginBottom="8dp" />
 
-        <Switch
+        <com.google.android.material.switchmaterial.SwitchMaterial
             android:id="@+id/switch_prefetch_content"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Pre-fetch Content for Nearby POIs"
-            android:checked="true"
-            android:switchMinWidth="56dp" />
+            android:text="@string/prefetch_content"
+            android:checked="true" />
 
-        <Switch
+        <com.google.android.material.switchmaterial.SwitchMaterial
             android:id="@+id/switch_use_mobile_data"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Use Mobile Data for Content"
+            android:text="@string/use_mobile_data"
             android:checked="false"
-            android:switchMinWidth="56dp"
             android:layout_marginTop="8dp" />
 
         <!-- Buttons -->
@@ -263,9 +254,10 @@
 
             <Button
                 android:id="@+id/btn_cancel"
+                style="?attr/materialButtonOutlinedStyle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Cancel"
+                android:text="@string/cancel_button"
                 android:layout_weight="1"
                 android:layout_marginEnd="8dp" />
 
@@ -273,9 +265,9 @@
                 android:id="@+id/btn_save"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Save"
+                android:text="@string/save"
                 android:layout_weight="1"
                 android:layout_marginStart="8dp" />
         </LinearLayout>
     </LinearLayout>
-</ScrollView> 
+</ScrollView>

@@ -11,12 +11,12 @@ import android.net.Uri
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.location.Location
+import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.text.method.ScrollingMovementMethod
 import android.view.View
 import android.view.ViewGroup
-import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
@@ -48,7 +48,6 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.OnMapReadyCallback
 import org.maplibre.android.maps.Style
 import com.google.android.material.floatingactionbutton.FloatingActionButton
-import com.google.android.material.textfield.TextInputEditText
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
@@ -107,7 +106,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     // MapLibre markers have no tag slot; keyed by Marker.id instead
     private val markerPlaceIds = mutableMapOf<Long, String>()
     private val LOCATION_PERMISSION_REQUEST = 1
-    private val BACKGROUND_LOCATION_PERMISSION_REQUEST = 2
+    private val TOUR_LOCATION_PERMISSION_REQUEST = 2
+    private val NOTIFICATION_PERMISSION_REQUEST = 3
 
     // The layers-sheet style currently applied to the map
     private var currentMapStyle = MapStyles.DEFAULT
@@ -151,10 +151,6 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     
     // UI elements for navigation
     private lateinit var searchBarCard: CardView
-    private lateinit var destinationInputView: View
-    private lateinit var etDestination: TextInputEditText
-    private lateinit var btnNavigate: Button
-    private lateinit var btnCloseDestination: Button
     private lateinit var navigationStatusCard: CardView
     private lateinit var tvNavigationDestination: TextView
     private lateinit var tvNavigationInfo: TextView
@@ -166,7 +162,14 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     // Route polyline
     private var routePolyline: org.maplibre.android.annotations.Polyline? = null
     private var destinationMarker: Marker? = null
-    private var isNavigating = false
+
+    /**
+     * Navigation is a three-state machine. PREVIEW computes and shows the
+     * route with a live ETA but stays quiet — no voice, no turn cards, no
+     * camera takeover — until the user taps Start and it becomes GUIDING.
+     */
+    private enum class NavState { NONE, PREVIEW, GUIDING }
+    private var navState = NavState.NONE
     
     // Service connection for binding to the TourModeService
     private val serviceConnection = object : ServiceConnection {
@@ -256,10 +259,6 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         
         // Initialize navigation UI elements
         searchBarCard = findViewById(R.id.search_bar_card)
-        destinationInputView = findViewById(R.id.destination_input)
-        etDestination = destinationInputView.findViewById(R.id.et_destination)
-        btnNavigate = destinationInputView.findViewById(R.id.btn_navigate)
-        btnCloseDestination = destinationInputView.findViewById(R.id.btn_close_destination)
         navigationStatusCard = findViewById(R.id.navigation_status_card)
         tvNavigationDestination = navigationStatusCard.findViewById(R.id.tv_navigation_destination)
         tvNavigationInfo = navigationStatusCard.findViewById(R.id.tv_navigation_info)
@@ -343,20 +342,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             launchDestinationSearch()
         }
         
-        // Set up click listener for the close destination button
-        btnCloseDestination.setOnClickListener {
-            hideDestinationInput()
-        }
-        
-        // Set up click listener for the navigate button
-        btnNavigate.setOnClickListener {
-            val destination = etDestination.text.toString().trim()
-            if (destination.isNotEmpty()) {
-                startNavigation(destination)
-            } else {
-                Toast.makeText(this, "Please enter a destination", Toast.LENGTH_SHORT).show()
-            }
-        }
+        // Navigation card buttons keep one role each; the card's state
+        // machine decides which are visible
+        binding.btnNavStart.setOnClickListener { beginGuidance() }
+        binding.btnNavStop.setOnClickListener { stopNavigation() }
 
         // Recenter FAB re-engages camera following
         findViewById<FloatingActionButton>(R.id.fab_recenter).setOnClickListener {
@@ -378,17 +367,6 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
                 .show(supportFragmentManager, TourJournalBottomSheet.TAG)
         }
 
-        // Set up editor action listener for the destination EditText
-        etDestination.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                val destination = etDestination.text.toString().trim()
-                if (destination.isNotEmpty()) {
-                    startNavigation(destination)
-                    return@setOnEditorActionListener true
-                }
-            }
-            return@setOnEditorActionListener false
-        }
     }
     
     private fun setupObservers() {
@@ -419,6 +397,16 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             }
         }
 
+        // Keep the fact card's play/pause button showing the action it
+        // would perform, in step with the notification's controls
+        lifecycleScope.launch {
+            tourModeService?.isNarrationPlaying?.collectLatest { playing ->
+                binding.btnNarrationPlayPause.setImageResource(
+                    if (playing) R.drawable.ic_pause else R.drawable.ic_play_arrow
+                )
+            }
+        }
+
         // Observe the tour mode service state using lifecycleScope
         lifecycleScope.launch {
             tourModeService?.serviceState?.collectLatest { state ->
@@ -436,7 +424,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
                         updateTourModeUI(false)
                         Toast.makeText(
                             this@MainActivity,
-                            "Tour mode error: ${state.message}",
+                            getString(R.string.tour_mode_error, state.message),
                             Toast.LENGTH_LONG
                         ).show()
                     }
@@ -452,6 +440,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     private fun showNarrationCard(narration: TourModeService.Narration?) {
         val card = binding.narrationCard
 
+        // A pending hide animation would set the card GONE after this
+        // update ran; every path below owns the card's state from here
+        card.animate().cancel()
+
         if (narration == null) {
             if (card.visibility == View.VISIBLE) {
                 card.animate()
@@ -466,6 +458,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             }
             return
         }
+        card.translationY = 0f
+        card.alpha = 1f
 
         binding.tvNarrationTitle.text = narration.poiName
         binding.tvNarrationCategory.text = narration.category ?: ""
@@ -476,7 +470,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         binding.tvNarrationFact.scrollTo(0, 0)
 
         val upNext = narration.upNextTitle
-        binding.tvNarrationUpNext.text = upNext?.let { "Up next: $it" } ?: ""
+        binding.tvNarrationUpNext.text = upNext?.let { getString(R.string.up_next, it) } ?: ""
         binding.tvNarrationUpNext.visibility =
             if (upNext.isNullOrBlank()) View.GONE else View.VISIBLE
 
@@ -489,7 +483,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
                 try {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                 } catch (e: ActivityNotFoundException) {
-                    Toast.makeText(this, "No browser available to open the article", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, R.string.no_browser_available, Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -515,27 +509,62 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     private fun updateTourModeUI(isActive: Boolean) {
         if (isActive) {
             tourModeStatusCard.visibility = View.VISIBLE
-            fabTourMode.setImageResource(android.R.drawable.ic_media_pause)
+            fabTourMode.setImageResource(R.drawable.ic_stop)
         } else {
             tourModeStatusCard.visibility = View.GONE
-            fabTourMode.setImageResource(android.R.drawable.ic_dialog_map)
+            fabTourMode.setImageResource(R.drawable.ic_tour)
         }
     }
     
+    /**
+     * Start tour mode once its two runtime permissions are settled. The
+     * tour service is a foreground service with the `location` type, so
+     * while-in-use location is enough — it keeps narrating with the screen
+     * off without ever needing "Allow all the time".
+     */
     private fun startTourMode() {
         Timber.d("startTourMode called")
-        // Check and request background location permission if needed
-        if (!checkBackgroundLocationPermission()) {
-            Timber.d("Background location permission needed")
-            requestBackgroundLocationPermission()
+        if (!hasLocationPermission()) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                TOUR_LOCATION_PERMISSION_REQUEST
+            )
             return
         }
-        
+
+        // Android 13+ blocks notifications until the user opts in; the tour
+        // status and its playback controls live in the shade, so ask before
+        // the first tour. Denial is not a blocker — the tour still narrates.
+        if (needsNotificationPermission()) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                NOTIFICATION_PERMISSION_REQUEST
+            )
+            return
+        }
+
+        launchTourService()
+    }
+
+    private fun hasLocationPermission(): Boolean =
+        ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun needsNotificationPermission(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+
+    private fun launchTourService() {
         // Create intent for the tour mode service
         val intent = Intent(this, TourModeService::class.java).apply {
             action = AppConstants.ACTION_START_TOUR_MODE
         }
-        
+
         // Start and bind to the service
         Timber.d("Starting and binding TourModeService")
         startService(intent)
@@ -544,7 +573,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             serviceConnection,
             Context.BIND_AUTO_CREATE
         )
-        
+
         isTourModeActive = true
         updateTourModeUI(true)
     }
@@ -672,7 +701,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         )
 
         placesViewModel.fetchNearbyPlaces(center = point, radius = SCOUT_RADIUS_METERS)
-        Toast.makeText(this, "Scouting this area for interesting places…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, R.string.scouting_area, Toast.LENGTH_SHORT).show()
     }
 
     // Request location permission; when granted, show the blue position dot
@@ -711,23 +740,6 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         startLocationUpdates()
     }
     
-    // Check if background location permission is granted
-    private fun checkBackgroundLocationPermission(): Boolean {
-        return ActivityCompat.checkSelfPermission(
-            this,
-            Manifest.permission.ACCESS_BACKGROUND_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-    }
-    
-    // Request background location permission
-    private fun requestBackgroundLocationPermission() {
-        ActivityCompat.requestPermissions(
-            this,
-            arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
-            BACKGROUND_LOCATION_PERMISSION_REQUEST
-        )
-    }
-
     // Set up a location request for frequent updates
     private fun startLocationUpdates() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
@@ -754,9 +766,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             Timber.d("First location update, animating camera with zoom")
             mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(newLatLng.toMap(), FOLLOW_ZOOM))
             isFirstUpdate = false
-        } else if (isFollowingUser && !isNavigating) {
-            // Navigation drives its own tilted/bearing camera; outside of it,
-            // follow the user unless they've panned away.
+        } else if (isFollowingUser && navState == NavState.NONE) {
+            // Navigation drives its own tilted/bearing camera, and a route
+            // preview holds the route overview; outside of those, follow
+            // the user unless they've panned away.
             mMap.animateCamera(CameraUpdateFactory.newLatLng(newLatLng.toMap()), 1000)
         }
     }
@@ -781,22 +794,33 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         when (requestCode) {
             LOCATION_PERMISSION_REQUEST -> {
-                if ((grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)) {
+                if (grantResults.isNotEmpty() && grantResults.any { it == PackageManager.PERMISSION_GRANTED }) {
                     Timber.d("Location permission granted")
                     enableMyLocation()
                 } else {
                     Timber.w("Location permission denied")
-                    Toast.makeText(this, "Location permission denied", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, R.string.location_permission_denied, Toast.LENGTH_SHORT).show()
                 }
             }
-            BACKGROUND_LOCATION_PERMISSION_REQUEST -> {
-                if ((grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)) {
-                    Timber.d("Background location permission granted, starting tour mode")
+            TOUR_LOCATION_PERMISSION_REQUEST -> {
+                if (grantResults.isNotEmpty() && grantResults.any { it == PackageManager.PERMISSION_GRANTED }) {
+                    Timber.d("Location permission granted for tour mode")
+                    enableMyLocation()
+                    // Continue the tour start; next stop is the notification check
                     startTourMode()
                 } else {
-                    Timber.w("Background location permission denied")
-                    Toast.makeText(this, "Background location permission denied. Tour mode requires this permission.", Toast.LENGTH_LONG).show()
+                    Timber.w("Location permission denied; tour mode cannot start")
+                    Toast.makeText(this, R.string.tour_needs_location, Toast.LENGTH_LONG).show()
                 }
+            }
+            NOTIFICATION_PERMISSION_REQUEST -> {
+                // Either way the tour can run; without the permission the
+                // status card in the app is the only tour surface
+                if (grantResults.isEmpty() || grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                    Timber.w("Notification permission denied; tour notifications will not show")
+                    Toast.makeText(this, R.string.notifications_disabled_hint, Toast.LENGTH_LONG).show()
+                }
+                launchTourService()
             }
         }
     }
@@ -899,7 +923,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     // Clean up resources when the activity is destroyed
     override fun onDestroy() {
         // Stop navigation if active
-        if (isNavigating) {
+        if (navState != NavState.NONE) {
             navigationService.stopNavigation()
         }
 
@@ -923,25 +947,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         }
     }
 
-    // Show the destination input card (it takes the search bar's slot)
-    private fun showDestinationInput() {
-        destinationInputView.visibility = View.VISIBLE
-        navigationStatusCard.visibility = View.GONE
-        searchBarCard.visibility = View.GONE
-    }
-
-    // Hide the destination input card
-    private fun hideDestinationInput() {
-        destinationInputView.visibility = View.GONE
-        if (!isNavigating) {
-            searchBarCard.visibility = View.VISIBLE
-        }
-    }
-    
     // Show the navigation status card
     private fun showNavigationStatus() {
         navigationStatusCard.visibility = View.VISIBLE
-        destinationInputView.visibility = View.GONE
     }
     
     // Hide the navigation status card
@@ -949,48 +957,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         navigationStatusCard.visibility = View.GONE
     }
     
-    // Start navigation to the given destination address
-    private fun startNavigation(destinationAddress: String) {
-        navigationJob?.cancel()
-        navigationJob = lifecycleScope.launch {
-            try {
-                // Geocoding is a network call that can hang on a bad
-                // connection — show the status card immediately in a
-                // cancelable state instead of dead air
-                tvNavigationDestination.text = getString(R.string.navigating_to, destinationAddress)
-                tvNavigationInfo.text = getString(R.string.calculating_route)
-                binding.btnStopNavigation.text = getString(R.string.cancel_button)
-                binding.btnStopNavigation.setOnClickListener { stopNavigation() }
-                hideDestinationInput()
-                showNavigationStatus()
-                searchBarCard.visibility = View.GONE
-
-                // Get coordinates from the address using interface method (no casting needed)
-                val destinationLatLng = navigationService.geocodeAddress(destinationAddress)
-
-                if (destinationLatLng != null) {
-                    // Start common navigation setup
-                    startActiveNavigation(destinationLatLng, destinationAddress)
-                } else {
-                    Toast.makeText(this@MainActivity, "Could not find location: $destinationAddress", Toast.LENGTH_SHORT).show()
-                    hideNavigationStatus()
-                    searchBarCard.visibility = View.VISIBLE
-                }
-            } catch (e: CancellationException) {
-                throw e // cancellation is the user's doing, not an error
-            } catch (e: Exception) {
-                Timber.e(e, "Error starting navigation: ${e.message}")
-                Toast.makeText(this@MainActivity, "Error starting navigation: ${e.message}", Toast.LENGTH_SHORT).show()
-                hideNavigationStatus()
-                searchBarCard.visibility = View.VISIBLE
-            }
-        }
-    }
-    
     // DestinationSearchHost: bias search results toward where the user is
     override fun searchLocationBias(): LatLng? = lastKnownLatLng
 
-    // DestinationSearchHost: a search result was picked — navigate to it
+    // DestinationSearchHost: a search result was picked — preview the route
     override fun onDestinationSelected(name: String, latLng: LatLng) {
         navigationJob?.cancel()
         navigationJob = lifecycleScope.launch {
@@ -998,75 +968,90 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         }
     }
 
-    // Common method for starting navigation regardless of the entry point
+    /**
+     * Route preview: compute the route right away and show it with a live
+     * ETA, but hold guidance — voice prompts, turn cards, the chase camera —
+     * until the user taps Start. One status collection runs for the whole
+     * session; beginGuidance() only changes what the collector is allowed
+     * to do with the updates. Tracked in navigationJob so Cancel/End (or a
+     * new destination) stops it even mid-route-calculation.
+     */
     private suspend fun startActiveNavigation(destinationLatLng: LatLng, displayName: String) {
         try {
-            // Update UI
-            tvNavigationDestination.text = getString(R.string.navigating_to, displayName)
-            tvNavigationInfo.text = getString(R.string.eta_calculating)
-            
-            // Start navigation
-            isNavigating = true
-            hideDestinationInput()
+            navState = NavState.PREVIEW
+            updateNavButtons()
+            tvNavigationDestination.text = getString(R.string.route_to, displayName)
+            tvNavigationInfo.text = getString(R.string.calculating_route)
+            binding.progressEta.progress = 0
             showNavigationStatus()
             searchBarCard.visibility = View.GONE
-            
-            // Update UI with Start Navigation button
-            binding.btnStopNavigation.text = getString(R.string.start_navigation)
-            
-            // Set button click listener for actual navigation
-            binding.btnStopNavigation.setOnClickListener {
-                // Change button text to "End Navigation"
-                binding.btnStopNavigation.text = getString(R.string.end_navigation)
-                
-                // Reset click listener to end navigation
-                binding.btnStopNavigation.setOnClickListener { 
-                    stopNavigation()
-                }
-                
-                // Show a toast indicating navigation has started
-                Toast.makeText(this@MainActivity, "Navigation started to $displayName", Toast.LENGTH_SHORT).show()
 
-                // Start collecting navigation updates. Tracked so that "End
-                // Navigation" (or a new destination) actually cancels the
-                // collector — including mid-route-calculation, when the
-                // Directions API is still in flight.
-                navigationJob?.cancel()
-                navigationJob = lifecycleScope.launch {
-                    var corridorRouteVersion = -1
-                    navigationService.startNavigation(destinationLatLng).collectLatest { status ->
-                        // Also shows the next instruction when one is available
-                        updateNavigationStatus(status, displayName)
+            var corridorRouteVersion = -1
+            navigationService.startNavigation(destinationLatLng).collectLatest { status ->
+                // Also shows the next instruction when one is available
+                updateNavigationStatus(status, displayName)
 
-                        // On every new route (initial calculation or off-route
-                        // recalculation): clear the stale polyline so it is
-                        // redrawn, and re-register the tour corridor so
-                        // narration follows the *new* drive
-                        if (status.routeVersion != corridorRouteVersion) {
-                            val route = navigationService.getCurrentRoute()
-                            if (route.isNotEmpty()) {
-                                routePolyline?.remove()
-                                routePolyline = null
-                                tourModeService?.updateRouteCorridor(route)
-                                corridorRouteVersion = status.routeVersion
-                            }
+                // On every new route (initial calculation or off-route
+                // recalculation): clear the stale polyline so it is
+                // redrawn, and while guiding re-register the tour corridor
+                // so narration follows the *new* drive
+                if (status.routeVersion != corridorRouteVersion) {
+                    val route = navigationService.getCurrentRoute()
+                    if (route.isNotEmpty()) {
+                        routePolyline?.remove()
+                        routePolyline = null
+                        if (navState == NavState.GUIDING) {
+                            tourModeService?.updateRouteCorridor(route)
                         }
-
-                        // Draw the route - moved this here to ensure route data is available
-                        drawRouteFromNavigationService()
-
-                        // Update camera to follow user if in navigation mode
-                        status.currentLocation.let { currentLocation ->
-                            updateCameraForNavigation(currentLocation)
-                        }
+                        corridorRouteVersion = status.routeVersion
                     }
+                }
+
+                // Draw the route - moved this here to ensure route data is available
+                drawRouteFromNavigationService()
+
+                // While guiding, the camera follows the drive
+                status.currentLocation.let { currentLocation ->
+                    updateCameraForNavigation(currentLocation)
                 }
             }
         } catch (e: CancellationException) {
             throw e // cancellation is the user's doing, not an error
         } catch (e: Exception) {
             Timber.e(e, "Error starting navigation: ${e.message}")
-            Toast.makeText(this@MainActivity, "Error starting navigation: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@MainActivity, getString(R.string.navigation_error, e.message), Toast.LENGTH_SHORT).show()
+            stopNavigation()
+        }
+    }
+
+    /** PREVIEW → GUIDING: turn on voice prompts, turn cards, and the chase camera. */
+    private fun beginGuidance() {
+        if (navState != NavState.PREVIEW) return
+        navState = NavState.GUIDING
+        updateNavButtons()
+        isFollowingUser = true
+
+        // Tour narration follows the planned drive instead of the current spot
+        lifecycleScope.launch {
+            val route = navigationService.getCurrentRoute()
+            if (route.isNotEmpty()) {
+                tourModeService?.updateRouteCorridor(route)
+            }
+        }
+    }
+
+    /** Keep the two nav-card buttons in sync with the state machine. */
+    private fun updateNavButtons() {
+        when (navState) {
+            NavState.PREVIEW -> {
+                binding.btnNavStart.visibility = View.VISIBLE
+                binding.btnNavStop.text = getString(R.string.cancel_button)
+            }
+            NavState.GUIDING -> {
+                binding.btnNavStart.visibility = View.GONE
+                binding.btnNavStop.text = getString(R.string.end_navigation)
+            }
+            NavState.NONE -> Unit
         }
     }
     
@@ -1120,8 +1105,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     
     // Update camera position for active navigation
     private fun updateCameraForNavigation(currentLocation: LatLng) {
-        // Don't update if we're not navigating or the user panned away
-        if (!isNavigating || !isFollowingUser) return
+        // Only the guidance phase drives the camera, and not if the user panned away
+        if (navState != NavState.GUIDING || !isFollowingUser) return
 
         // Add location to history
         locationHistory.add(currentLocation)
@@ -1173,8 +1158,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             getString(R.string.eta_calculating)
         }
         
-        // Update UI
-        tvNavigationDestination.text = getString(R.string.navigating_to, destinationName)
+        // Update UI; a preview is a plan, not a drive
+        tvNavigationDestination.text = if (navState == NavState.GUIDING) {
+            getString(R.string.navigating_to, destinationName)
+        } else {
+            getString(R.string.route_to, destinationName)
+        }
         tvNavigationInfo.text = "$etaText • ${getString(R.string.distance_remaining, distanceText)}"
         // Update ETA progress bar roughly based on time remaining
         val remaining = status.timeRemaining
@@ -1183,9 +1172,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             else -> (1000.0 * (1.0 - (remaining.coerceAtMost(60 * 60 * 1000L).toDouble() / (60 * 60 * 1000L)))).toInt()
         }.coerceIn(0, 1000)
         
-        // Show the next instruction if available
-        status.nextInstruction?.let { instruction ->
-            showNextInstruction(instruction, status.announcementTiming)
+        // Turn instructions (and their voice prompts) belong to guidance;
+        // a preview stays quiet
+        if (navState == NavState.GUIDING) {
+            status.nextInstruction?.let { instruction ->
+                showNextInstruction(instruction, status.announcementTiming)
+            }
         }
     }
     
@@ -1287,7 +1279,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         navigationJob?.cancel()
         navigationJob = null
 
-        isNavigating = false
+        navState = NavState.NONE
         hideNavigationStatus()
         hideTurnInstructions()
         searchBarCard.visibility = View.VISIBLE

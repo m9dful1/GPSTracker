@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Lighter teals so primary-colored text and controls keep contrast
+         against dark surfaces. -->
+    <color name="brand_primary">#4DB6AC</color>
+    <color name="brand_primary_variant">#26A69A</color>
+    <color name="brand_on_primary">#FF00251F</color>
+    <color name="brand_secondary">#4DB6AC</color>
+    <color name="brand_on_secondary">#FF00251F</color>
+</resources>

@@ -79,6 +79,11 @@ class TourModeService : Service() {
     private val _currentNarration = MutableStateFlow<Narration?>(null)
     val currentNarration: StateFlow<Narration?> = _currentNarration
 
+    // Whether the current narration is audibly playing (false = paused).
+    // Lets the in-app fact card mirror the notification's play/pause state.
+    private val _isNarrationPlaying = MutableStateFlow(true)
+    val isNarrationPlaying: StateFlow<Boolean> = _isNarrationPlaying
+
     // Current user preferences
     private var userPreferences: UserPreferences = UserPreferences()
 
@@ -598,6 +603,7 @@ class TourModeService : Service() {
                 upNextTitle = upNextTitle(),
                 sourceUrl = content.metadata["sourceUrl"]
             )
+            _isNarrationPlaying.value = true
 
             // Speak the content, introduced like a live tour guide
             // ("On your left: Fort Point. ...")
@@ -781,7 +787,7 @@ class TourModeService : Service() {
         val builder = NotificationCompat.Builder(this, channelId)
             .setContentTitle(title)
             .setContentText(content)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_tour)
             .setContentIntent(mainPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
@@ -790,23 +796,23 @@ class TourModeService : Service() {
         when (channelId) {
             NOTIFICATION_CHANNEL_SERVICE -> {
                 // Basic service notification, just show stop action
-                builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Tour", stopPendingIntent)
+                builder.addAction(R.drawable.ic_stop, "Stop Tour", stopPendingIntent)
             }
             NOTIFICATION_CHANNEL_POI_APPROACHING, NOTIFICATION_CHANNEL_POI_ARRIVED -> {
                 // POI notifications, show all controls
-                builder.addAction(android.R.drawable.ic_media_pause, "Play/Pause", playPausePendingIntent)
-                      .addAction(android.R.drawable.ic_media_next, "Next", nextPendingIntent)
-                      .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Tour", stopPendingIntent)
+                builder.addAction(R.drawable.ic_pause, "Play/Pause", playPausePendingIntent)
+                      .addAction(R.drawable.ic_skip_next, "Next", nextPendingIntent)
+                      .addAction(R.drawable.ic_stop, "Stop Tour", stopPendingIntent)
                       .setStyle(NotificationCompat.DecoratedCustomViewStyle())
             }
             NOTIFICATION_CHANNEL_PLAYBACK -> {
                 // Playback notifications, focus on playback controls
                 builder.addAction(
-                    if (audioService.isSpeaking()) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                    if (audioService.isSpeaking()) R.drawable.ic_pause else R.drawable.ic_play_arrow,
                     if (audioService.isSpeaking()) "Pause" else "Play",
                     playPausePendingIntent
                 )
-                      .addAction(android.R.drawable.ic_media_next, "Next", nextPendingIntent)
+                      .addAction(R.drawable.ic_skip_next, "Next", nextPendingIntent)
                       .setStyle(NotificationCompat.DecoratedCustomViewStyle())
             }
         }
@@ -830,6 +836,7 @@ class TourModeService : Service() {
         serviceScope.launch {
             if (audioService.isSpeaking()) {
                 audioService.pause()
+                _isNarrationPlaying.value = false
                 updateNotification(
                     "Audio Paused",
                     "Paused narration for ${currentPoi?.name ?: "Unknown location"}",
@@ -837,6 +844,7 @@ class TourModeService : Service() {
                 )
             } else {
                 audioService.resume()
+                _isNarrationPlaying.value = true
                 val poiName = currentPoi?.name ?: "Unknown location"
                 updateNotification(
                     "Playing Audio",

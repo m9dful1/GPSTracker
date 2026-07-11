@@ -37,10 +37,10 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:textAppearance="?attr/textAppearanceCaption"
-        android:background="@android:color/darker_gray"
+        android:background="@drawable/bg_category_chip"
         android:paddingHorizontal="8dp"
         android:paddingVertical="2dp"
-        android:textColor="@android:color/white"
+        android:textColor="?attr/colorOnPrimary"
         android:textAllCaps="true"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/tv_place_address"
@@ -71,7 +71,7 @@
         tools:text="A description of this place and what makes it interesting to tourists." />
 
     <!-- Audio Controls Group -->
-    <androidx.cardview.widget.CardView
+    <com.google.android.material.card.MaterialCardView
         android:id="@+id/card_audio_controls"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
@@ -91,7 +91,7 @@
                 android:id="@+id/tv_audio_title"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="Audio Guide"
+                android:text="@string/audio_guide"
                 android:textAppearance="?attr/textAppearanceSubtitle1"
                 android:textStyle="bold"
                 app:layout_constraintEnd_toEndOf="parent"
@@ -113,7 +113,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginEnd="4dp"
                     android:layout_weight="1"
-                    android:text="Play" />
+                    android:text="@string/play" />
 
                 <Button
                     android:id="@+id/btn_pause_audio"
@@ -123,7 +123,7 @@
                     android:layout_marginEnd="4dp"
                     android:layout_weight="1"
                     android:enabled="false"
-                    android:text="Pause" />
+                    android:text="@string/pause" />
 
                 <Button
                     android:id="@+id/btn_stop_audio"
@@ -132,7 +132,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:enabled="false"
-                    android:text="Stop" />
+                    android:text="@string/stop" />
             </LinearLayout>
 
             <ProgressBar
@@ -152,13 +152,13 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:gravity="center"
-                android:text="Ready"
+                android:text="@string/audio_status_ready"
                 android:textAppearance="?attr/textAppearanceCaption"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@id/progress_audio" />
         </androidx.constraintlayout.widget.ConstraintLayout>
-    </androidx.cardview.widget.CardView>
+    </com.google.android.material.card.MaterialCardView>
 
     <Button
         android:id="@+id/btn_voice_settings"
@@ -166,7 +166,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="Voice Settings"
+        android:text="@string/voice_settings"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toBottomOf="@id/card_audio_controls" />
 
@@ -175,7 +175,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="Mark as Visited"
+        android:text="@string/mark_as_visited"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toBottomOf="@id/btn_voice_settings" />
 
@@ -186,7 +186,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:layout_marginEnd="8dp"
-        android:text="Add Notes"
+        android:text="@string/add_notes"
         app:layout_constraintEnd_toStartOf="@id/btn_mark_visited"
         app:layout_constraintTop_toBottomOf="@id/btn_voice_settings" />
 
@@ -195,7 +195,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:text="Your Notes:"
+        android:text="@string/your_notes"
         android:textAppearance="?attr/textAppearanceSubtitle2"
         android:textStyle="bold"
         android:visibility="gone"

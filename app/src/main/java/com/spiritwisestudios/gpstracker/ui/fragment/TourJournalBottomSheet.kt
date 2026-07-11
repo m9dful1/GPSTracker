@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import com.spiritwisestudios.gpstracker.R
 import com.spiritwisestudios.gpstracker.databinding.BottomSheetTourJournalBinding
 import com.spiritwisestudios.gpstracker.databinding.ItemJournalEntryBinding
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
@@ -60,10 +61,12 @@ class TourJournalBottomSheet : BottomSheetDialogFragment() {
         placesViewModel.visitedPlaces.observe(viewLifecycleOwner, Observer { places ->
             adapter.submitList(places)
             binding.tvJournalEmpty.visibility = if (places.isEmpty()) View.VISIBLE else View.GONE
-            binding.tvJournalSubtitle.text = when (places.size) {
-                0 -> "Nothing narrated yet"
-                1 -> "1 place discovered"
-                else -> "${places.size} places discovered"
+            binding.tvJournalSubtitle.text = if (places.isEmpty()) {
+                getString(R.string.journal_nothing_narrated)
+            } else {
+                resources.getQuantityString(
+                    R.plurals.journal_places_discovered, places.size, places.size
+                )
             }
             binding.btnJournalShare.isEnabled = places.isNotEmpty()
         })
@@ -78,7 +81,7 @@ class TourJournalBottomSheet : BottomSheetDialogFragment() {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_TEXT, text)
             }
-            startActivity(Intent.createChooser(sendIntent, "Share your tour journal"))
+            startActivity(Intent.createChooser(sendIntent, getString(R.string.share_journal_chooser)))
         }
     }
 

@@ -1,18 +1,131 @@
 <resources>
     <string name="app_name">GPS Tracker</string>
-    <string name="navigation_fab_description">Navigate to destination</string>
-    <string name="tour_mode_fab_description">Activate Tour Mode</string>
-    <string name="enter_destination">Enter Destination</string>
+
+    <!-- Map screen -->
+    <string name="tour_mode_fab_description">Start or stop Tour Mode</string>
+    <string name="recenter_map_description">Re-center the map on your location</string>
+    <string name="map_layers_description">Map layers</string>
+    <string name="tour_journal_description">Tour journal</string>
     <string name="search_bar_hint">Where to?</string>
+    <string name="scouting_area">Scouting this area for interesting places…</string>
+
+    <!-- Tour mode card -->
+    <string name="tour_mode_active">Tour Mode Active</string>
+    <string name="tour_mode_discovering">Discovering points of interest nearby…</string>
+    <string name="stop_tour">Stop Tour</string>
+    <string name="settings">Settings</string>
+    <string name="tour_mode_error">Tour mode error: %1$s</string>
+
+    <!-- Narration fact card -->
+    <string name="narration_source_wikipedia">From Wikipedia — read the full article</string>
+    <string name="narration_tap_for_details">Tap for details</string>
+    <string name="narration_play_pause_description">Pause or resume narration</string>
+    <string name="narration_skip_description">Skip to next place</string>
+    <string name="up_next">Up next: %1$s</string>
+    <string name="no_browser_available">No browser available to open the article</string>
+
+    <!-- Permissions -->
+    <string name="location_permission_denied">Location permission denied</string>
+    <string name="tour_needs_location">Tour mode needs location access to find places around you</string>
+    <string name="notifications_disabled_hint">Notifications are off — tour updates will only show inside the app</string>
+
+    <!-- Navigation -->
     <string name="search_no_results">No results for “%1$s”</string>
-    <string name="destination_hint">Destination</string>
-    <string name="navigate_button">Navigate</string>
     <string name="cancel_button">Cancel</string>
-    <string name="navigating_to">Navigating to %s</string>
+    <string name="navigating_to">Navigating to %1$s</string>
+    <string name="route_to">Route to %1$s</string>
     <string name="eta_calculating">Calculating ETA…</string>
-    <string name="eta_format">ETA: %s</string>
-    <string name="distance_remaining">%s remaining</string>
+    <string name="eta_format">ETA: %1$s</string>
+    <string name="distance_remaining">%1$s remaining</string>
     <string name="calculating_route">Calculating route…</string>
     <string name="start_navigation">Start Navigation</string>
     <string name="end_navigation">End Navigation</string>
+    <string name="navigation_error">Error starting navigation: %1$s</string>
+
+    <!-- Turn instruction card -->
+    <string name="turn_by_turn_title">Turn-by-Turn Navigation</string>
+    <string name="close">Close</string>
+
+    <!-- Destination search sheet -->
+    <string name="search_destination_title">Search destination</string>
+    <string name="search_places_hint">Search places and addresses</string>
+
+    <!-- Map layers sheet -->
+    <string name="map_layers_title">Map layers</string>
+    <string name="map_style">Map style</string>
+    <string name="map_style_default">Default</string>
+    <string name="map_style_bright">Bright</string>
+    <string name="map_style_minimal">Minimal</string>
+    <string name="map_style_dark">Dark</string>
+
+    <!-- Tour journal sheet -->
+    <string name="tour_journal_title">Tour Journal</string>
+    <string name="share_journal_description">Share journal</string>
+    <string name="journal_empty">No places yet — start a tour and the places you hear about will be collected here.</string>
+    <string name="journal_nothing_narrated">Nothing narrated yet</string>
+    <plurals name="journal_places_discovered">
+        <item quantity="one">%d place discovered</item>
+        <item quantity="other">%d places discovered</item>
+    </plurals>
+    <string name="share_journal_chooser">Share your tour journal</string>
+
+    <!-- Place details sheet -->
+    <string name="audio_guide">Audio Guide</string>
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+    <string name="stop">Stop</string>
+    <string name="voice_settings">Voice Settings</string>
+    <string name="mark_as_visited">Mark as Visited</string>
+    <string name="visited">Visited</string>
+    <string name="add_notes">Add Notes</string>
+    <string name="your_notes">Your Notes:</string>
+    <string name="no_description_available">No description available.</string>
+    <string name="marked_visited_toast">%1$s marked as visited!</string>
+    <string name="add_notes_title">Add Notes for %1$s</string>
+    <string name="notes_hint">Enter your notes…</string>
+    <string name="save">Save</string>
+    <string name="voice_settings_updated">Voice settings updated</string>
+
+    <!-- Audio / content status -->
+    <string name="audio_status_ready">Ready</string>
+    <string name="audio_status_content_ready">Content ready for playback</string>
+    <string name="audio_status_starting">Starting playback…</string>
+    <string name="audio_status_playing">Playing…</string>
+    <string name="audio_status_paused">Paused</string>
+    <string name="audio_status_completed">Playback completed</string>
+    <string name="audio_status_error">Error during playback</string>
+    <string name="content_generating">Generating content…</string>
+    <string name="content_generating_progress">Generating content: %1$d%%</string>
+    <string name="content_generated">Content generated successfully</string>
+    <string name="content_error">Error: %1$s</string>
+
+    <!-- Voice settings dialog -->
+    <string name="enable_audio">Enable Audio</string>
+    <string name="voice_speed">Voice Speed</string>
+    <string name="voice_pitch">Voice Pitch</string>
+
+    <!-- Tour settings sheet -->
+    <string name="tour_settings_title">Tour Mode Settings</string>
+    <string name="content_preferences">Content Preferences</string>
+    <string name="poi_categories">Points of Interest Categories</string>
+    <string name="category_historical">Historical</string>
+    <string name="category_cultural">Cultural</string>
+    <string name="category_natural">Natural</string>
+    <string name="category_architectural">Architectural</string>
+    <string name="category_entertainment">Entertainment</string>
+    <string name="category_dining">Dining</string>
+    <string name="category_shopping">Shopping</string>
+    <string name="content_detail_level">Content Detail Level</string>
+    <string name="detail_brief">Brief</string>
+    <string name="detail_medium">Medium</string>
+    <string name="detail_detailed">Detailed</string>
+    <string name="audio_settings">Audio Settings</string>
+    <string name="audio_narration_enabled">Audio Narration Enabled</string>
+    <string name="auto_play_content">Auto-play Content When Approaching POIs</string>
+    <string name="notification_settings">Notification Settings</string>
+    <string name="notification_distance">Notification distance</string>
+    <string name="max_notifications_per_hour">Max Notifications Per Hour</string>
+    <string name="battery_usage">Battery Usage</string>
+    <string name="prefetch_content">Pre-fetch Content for Nearby POIs</string>
+    <string name="use_mobile_data">Use Mobile Data for Content</string>
 </resources>

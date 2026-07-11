@@ -81,7 +81,7 @@ class PlaceDetailsBottomSheet : BottomSheetDialogFragment() {
             }
             
             // Update description if available
-            tvPlaceDescription.text = place.description ?: "No description available."
+            tvPlaceDescription.text = place.description ?: getString(R.string.no_description_available)
             
             // Show user notes if they exist
             if (place.userNotes.isNullOrEmpty()) {
@@ -95,11 +95,9 @@ class PlaceDetailsBottomSheet : BottomSheetDialogFragment() {
             
             // Update visit status button
             btnMarkVisited.isEnabled = !place.isVisited
-            if (place.isVisited) {
-                btnMarkVisited.text = "Visited"
-            } else {
-                btnMarkVisited.text = "Mark as Visited"
-            }
+            btnMarkVisited.text = getString(
+                if (place.isVisited) R.string.visited else R.string.mark_as_visited
+            )
         }
     }
     
@@ -110,7 +108,7 @@ class PlaceDetailsBottomSheet : BottomSheetDialogFragment() {
             
             // Enable the audio controls
             btnPlayAudio.isEnabled = true
-            tvAudioStatus.text = "Content ready for playback"
+            tvAudioStatus.text = getString(R.string.audio_status_content_ready)
         }
     }
     
@@ -123,7 +121,7 @@ class PlaceDetailsBottomSheet : BottomSheetDialogFragment() {
                     btnStopAudio.isEnabled = true
                     progressAudio.visibility = View.VISIBLE
                     progressAudio.isIndeterminate = true
-                    tvAudioStatus.text = "Starting playback..."
+                    tvAudioStatus.text = getString(R.string.audio_status_starting)
                 }
                 AudioService.SpeakingStatus.IN_PROGRESS -> {
                     btnPlayAudio.isEnabled = false
@@ -132,35 +130,35 @@ class PlaceDetailsBottomSheet : BottomSheetDialogFragment() {
                     progressAudio.visibility = View.VISIBLE
                     progressAudio.isIndeterminate = false
                     progressAudio.progress = 50 // Without proper duration tracking, just show 50%
-                    tvAudioStatus.text = "Playing..."
+                    tvAudioStatus.text = getString(R.string.audio_status_playing)
                 }
                 AudioService.SpeakingStatus.PAUSED -> {
                     btnPlayAudio.isEnabled = true
                     btnPauseAudio.isEnabled = false
                     btnStopAudio.isEnabled = true
                     progressAudio.visibility = View.VISIBLE
-                    tvAudioStatus.text = "Paused"
+                    tvAudioStatus.text = getString(R.string.audio_status_paused)
                 }
                 AudioService.SpeakingStatus.COMPLETED -> {
                     btnPlayAudio.isEnabled = true
                     btnPauseAudio.isEnabled = false
                     btnStopAudio.isEnabled = false
                     progressAudio.visibility = View.INVISIBLE
-                    tvAudioStatus.text = "Playback completed"
+                    tvAudioStatus.text = getString(R.string.audio_status_completed)
                 }
                 AudioService.SpeakingStatus.ERROR -> {
                     btnPlayAudio.isEnabled = true
                     btnPauseAudio.isEnabled = false
                     btnStopAudio.isEnabled = false
                     progressAudio.visibility = View.INVISIBLE
-                    tvAudioStatus.text = "Error during playback"
+                    tvAudioStatus.text = getString(R.string.audio_status_error)
                 }
                 null -> {
                     btnPlayAudio.isEnabled = true
                     btnPauseAudio.isEnabled = false
                     btnStopAudio.isEnabled = false
                     progressAudio.visibility = View.INVISIBLE
-                    tvAudioStatus.text = "Ready"
+                    tvAudioStatus.text = getString(R.string.audio_status_ready)
                 }
             }
         }
@@ -170,25 +168,26 @@ class PlaceDetailsBottomSheet : BottomSheetDialogFragment() {
         with(binding) {
             when (result) {
                 is TourContentRepository.ContentGenerationResult.Queued -> {
-                    tvAudioStatus.text = "Generating content..."
+                    tvAudioStatus.text = getString(R.string.content_generating)
                     progressAudio.visibility = View.VISIBLE
                     progressAudio.isIndeterminate = true
                     btnPlayAudio.isEnabled = false
                 }
                 is TourContentRepository.ContentGenerationResult.InProgress -> {
-                    tvAudioStatus.text = "Generating content: ${(result.progress * 100).toInt()}%"
+                    tvAudioStatus.text =
+                        getString(R.string.content_generating_progress, (result.progress * 100).toInt())
                     progressAudio.visibility = View.VISIBLE
                     progressAudio.isIndeterminate = false
                     progressAudio.progress = (result.progress * 100).toInt()
                     btnPlayAudio.isEnabled = false
                 }
                 is TourContentRepository.ContentGenerationResult.Success -> {
-                    tvAudioStatus.text = "Content generated successfully"
+                    tvAudioStatus.text = getString(R.string.content_generated)
                     progressAudio.visibility = View.INVISIBLE
                     btnPlayAudio.isEnabled = true
                 }
                 is TourContentRepository.ContentGenerationResult.Error -> {
-                    tvAudioStatus.text = "Error: ${result.message}"
+                    tvAudioStatus.text = getString(R.string.content_error, result.message)
                     progressAudio.visibility = View.INVISIBLE
                     btnPlayAudio.isEnabled = false
                 }
@@ -203,7 +202,7 @@ class PlaceDetailsBottomSheet : BottomSheetDialogFragment() {
             placesViewModel.selectedPlace.value?.let { place ->
                 if (!place.isVisited) {
                     placesViewModel.markPlaceAsVisited(place)
-                    Toast.makeText(context, "${place.name} marked as visited!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, getString(R.string.marked_visited_toast, place.name), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -238,20 +237,20 @@ class PlaceDetailsBottomSheet : BottomSheetDialogFragment() {
         // Create an EditText for the dialog
         val editText = android.widget.EditText(context).apply {
             setText(place.userNotes)
-            hint = "Enter your notes..."
+            hint = getString(R.string.notes_hint)
             setSingleLine(false)
             minLines = 3
         }
-        
+
         // Create the dialog
         MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Add Notes for ${place.name}")
+            .setTitle(getString(R.string.add_notes_title, place.name))
             .setView(editText)
-            .setPositiveButton("Save") { _, _ ->
+            .setPositiveButton(R.string.save) { _, _ ->
                 val notes = editText.text.toString().trim()
                 placesViewModel.addUserNotes(place, notes)
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(R.string.cancel_button, null)
             .show()
     }
     
@@ -266,18 +265,18 @@ class PlaceDetailsBottomSheet : BottomSheetDialogFragment() {
         
         // Create the dialog
         MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Voice Settings")
+            .setTitle(R.string.voice_settings)
             .setView(dialogBinding.root)
-            .setPositiveButton("Save") { _, _ ->
+            .setPositiveButton(R.string.save) { _, _ ->
                 // Save the voice settings
                 placesViewModel.updateAudioSettings(
                     audioEnabled = dialogBinding.switchAudioEnabled.isChecked,
                     voiceSpeed = dialogBinding.sliderVoiceSpeed.value,
                     voicePitch = dialogBinding.sliderVoicePitch.value
                 )
-                Toast.makeText(context, "Voice settings updated", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, R.string.voice_settings_updated, Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(R.string.cancel_button, null)
             .show()
     }
     

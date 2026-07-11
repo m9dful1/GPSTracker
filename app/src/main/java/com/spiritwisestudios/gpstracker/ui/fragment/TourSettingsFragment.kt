@@ -9,12 +9,12 @@ import android.widget.CheckBox
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.SeekBar
-import android.widget.Switch
 import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import com.google.android.material.switchmaterial.SwitchMaterial
 import com.spiritwisestudios.gpstracker.R
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
@@ -50,12 +50,12 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
     private lateinit var rbDetailDetailed: RadioButton
     
     // Audio Settings
-    private lateinit var switchAudioEnabled: Switch
+    private lateinit var switchAudioEnabled: SwitchMaterial
     private lateinit var seekBarVoiceSpeed: SeekBar
     private lateinit var tvVoiceSpeedValue: TextView
     private lateinit var seekBarVoicePitch: SeekBar
     private lateinit var tvVoicePitchValue: TextView
-    private lateinit var switchAutoPlay: Switch
+    private lateinit var switchAutoPlay: SwitchMaterial
     
     // Notification Settings
     private lateinit var seekBarNotifyDistance: SeekBar
@@ -64,8 +64,8 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
     private lateinit var tvMaxNotificationsValue: TextView
     
     // Battery Usage
-    private lateinit var switchPrefetchContent: Switch
-    private lateinit var switchUseMobileData: Switch
+    private lateinit var switchPrefetchContent: SwitchMaterial
+    private lateinit var switchUseMobileData: SwitchMaterial
     
     // Buttons
     private lateinit var btnCancel: Button

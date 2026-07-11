@@ -1,8 +1,13 @@
 <resources>
-    <style name="Theme.GPSTracker" parent="Theme.MaterialComponents.Light.NoActionBar">
-        <!-- Theme colors go here -->
-        <item name="colorPrimary">@color/colorPrimary</item>
-        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
-        <item name="colorAccent">@color/colorAccent</item>
+    <!-- Single app theme. DayNight keeps every surface, sheet, and text
+         color in step with the system setting — the map style already
+         follows it, so the chrome must too. -->
+    <style name="Theme.GPSTracker" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorPrimaryVariant">@color/brand_primary_variant</item>
+        <item name="colorOnPrimary">@color/brand_on_primary</item>
+        <item name="colorSecondary">@color/brand_secondary</item>
+        <item name="colorSecondaryVariant">@color/brand_primary_variant</item>
+        <item name="colorOnSecondary">@color/brand_on_secondary</item>
     </style>
 </resources>
