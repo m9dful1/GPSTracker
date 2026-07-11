@@ -1,6 +1,7 @@
 package com.spiritwisestudios.gpstracker.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -35,5 +36,61 @@ class CameraLogicTest {
     @Test
     fun `negative GPS speed is treated as stationary`() {
         assertEquals(CameraLogic.MAX_ZOOM, CameraLogic.zoomForSpeed(-3f))
+    }
+
+    @Test
+    fun `driving view engages at driving speed`() {
+        val gate = CameraLogic.DrivingCameraGate()
+        assertTrue(gate.onSpeed(10f))
+    }
+
+    @Test
+    fun `walking never engages the driving view`() {
+        val gate = CameraLogic.DrivingCameraGate()
+        repeat(100) {
+            assertFalse(gate.onSpeed(1.4f)) // brisk walk
+        }
+    }
+
+    @Test
+    fun `a short red light keeps the driving view`() {
+        val gate = CameraLogic.DrivingCameraGate()
+        gate.onSpeed(15f)
+        repeat(CameraLogic.STILL_FIXES_TO_RELEASE - 1) {
+            assertTrue(gate.onSpeed(0f))
+        }
+        // Light turns green before the release threshold
+        assertTrue(gate.onSpeed(15f))
+    }
+
+    @Test
+    fun `a sustained stop releases the driving view`() {
+        val gate = CameraLogic.DrivingCameraGate()
+        gate.onSpeed(15f)
+        repeat(CameraLogic.STILL_FIXES_TO_RELEASE) {
+            gate.onSpeed(0f)
+        }
+        assertFalse(gate.isDriving)
+    }
+
+    @Test
+    fun `moving again keeps resetting the release countdown`() {
+        val gate = CameraLogic.DrivingCameraGate()
+        gate.onSpeed(15f)
+        repeat(3) {
+            repeat(CameraLogic.STILL_FIXES_TO_RELEASE - 1) {
+                gate.onSpeed(0f)
+            }
+            gate.onSpeed(15f) // creep forward in traffic
+        }
+        assertTrue(gate.isDriving)
+    }
+
+    @Test
+    fun `reset releases the driving view immediately`() {
+        val gate = CameraLogic.DrivingCameraGate()
+        gate.onSpeed(15f)
+        gate.reset()
+        assertFalse(gate.isDriving)
     }
 }
