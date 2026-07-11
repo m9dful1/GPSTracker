@@ -13,6 +13,7 @@ import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.service.LocationAwarenessService
 import com.spiritwisestudios.gpstracker.service.TourModeService
 import com.spiritwisestudios.gpstracker.util.AppConstants
+import com.spiritwisestudios.gpstracker.util.LocationCadence
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,23 +56,15 @@ class LocationAwarenessServiceImpl @Inject constructor(
     private var previousLocation: Location? = null
     private var previousLocationTimestamp: Long = 0
     private var currentSpeed = 0f // meters per second
+    private var currentBearing = 0f // degrees, direction of travel
 
-    // Constants for location update intervals (in milliseconds)
+    // Inputs to the update-cadence policy; re-registering the listener is
+    // not free (the provider restarts its delivery schedule), so track what
+    // is currently requested and only re-register on an actual change
+    private var batteryPercent = 100
+    private var requestedIntervalMs = 0L
+
     companion object {
-        // Base intervals
-        private const val INTERVAL_HIGH_POWER = 5000L // 5 seconds
-        private const val INTERVAL_BALANCED = 10000L // 10 seconds
-        private const val INTERVAL_LOW_POWER = 30000L // 30 seconds
-
-        // Battery thresholds
-        private const val BATTERY_LOW_THRESHOLD = 15
-        private const val BATTERY_MEDIUM_THRESHOLD = 50
-
-        // Speed thresholds (in meters per second)
-        private const val SPEED_STATIONARY = 0.5f // < 1.8 km/h
-        private const val SPEED_WALKING = 2.0f // ~ 7.2 km/h
-        private const val SPEED_DRIVING_SLOW = 8.0f // ~ 29 km/h
-
         // Linger this long inside a radius before the "dwell" notification
         private const val DWELL_DELAY_MS = 30_000L
     }
@@ -81,11 +74,12 @@ class LocationAwarenessServiceImpl @Inject constructor(
         override fun onReceive(context: Context, intent: Intent) {
             val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
             val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-            val batteryPct = level * 100 / scale.toFloat()
+            if (level == -1 || scale == -1) return
+            batteryPercent = (level * 100 / scale.toFloat()).toInt()
 
-            // Update location intervals if monitoring is active
+            // Update location cadence if monitoring is active
             if (isMonitoring) {
-                requestUpdatesWithInterval(intervalForBattery(batteryPct.toInt()))
+                applyDesiredInterval()
             }
         }
     }
@@ -108,18 +102,18 @@ class LocationAwarenessServiceImpl @Inject constructor(
         val batteryStatus = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val level = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
         val scale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
-        val batteryPct = if (level != -1 && scale != -1) level * 100 / scale.toFloat() else 100f
+        batteryPercent = if (level != -1 && scale != -1) (level * 100 / scale.toFloat()).toInt() else 100
 
         // Location listener drives proximity alerts and manual geofencing
         locationListener = LocationListenerCompat { location ->
-            // Calculate speed
-            updateSpeed(location)
+            // Speed and direction of travel, computed once per fix
+            updateMotion(location)
 
             // Process the new location (alerts + geofence transitions)
             processNewLocation(location, detectionRadius)
 
-            // Check if we need to update location request based on speed
-            updateLocationRequestBasedOnSpeed()
+            // Speed may have moved the desired cadence to another band
+            applyDesiredInterval()
 
             // Check if new alert is available
             proximityAlerts.value?.let { alert ->
@@ -128,8 +122,8 @@ class LocationAwarenessServiceImpl @Inject constructor(
         }
 
         try {
-            // Start location updates at a battery-appropriate interval
-            requestUpdatesWithInterval(intervalForBattery(batteryPct.toInt()))
+            // Start location updates at a speed/battery-appropriate cadence
+            applyDesiredInterval()
             isMonitoring = true
         } catch (e: SecurityException) {
             Timber.e(e, "Missing location permission")
@@ -144,58 +138,59 @@ class LocationAwarenessServiceImpl @Inject constructor(
         }
     }
 
-    /** Update interval appropriate for the battery level. */
-    private fun intervalForBattery(batteryLevel: Int): Long {
-        return when {
-            batteryLevel <= BATTERY_LOW_THRESHOLD -> INTERVAL_LOW_POWER
-            batteryLevel <= BATTERY_MEDIUM_THRESHOLD -> INTERVAL_BALANCED
-            else -> INTERVAL_HIGH_POWER
-        }
-    }
+    /**
+     * (Re-)register the active listener when speed or battery moves the
+     * desired cadence to a different band. A no-op while the requested
+     * interval already matches, so steady driving doesn't reset the
+     * provider's delivery schedule on every fix.
+     */
+    private fun applyDesiredInterval() {
+        val desired = LocationCadence.intervalMs(currentSpeed, batteryPercent)
+        if (desired == requestedIntervalMs) return
 
-    /** (Re-)register the active listener at a new update interval. */
-    private fun requestUpdatesWithInterval(intervalMs: Long) {
         locationListener?.let {
-            locationClient.requestUpdates(intervalMs, 0f, it)
-            Timber.d("Location updates requested with interval $intervalMs ms")
+            locationClient.requestUpdates(desired, 0f, it)
+            requestedIntervalMs = desired
+            Timber.d("Location updates requested with interval $desired ms")
         }
     }
 
     /**
-     * Update speed calculation based on new location.
+     * Update speed and direction of travel from a new fix. The fix's own
+     * Doppler speed and course are preferred — they are instantaneous and
+     * far less noisy than deltas between consecutive positions, which only
+     * serve as the fallback.
      */
-    private fun updateSpeed(location: Location) {
+    private fun updateMotion(location: Location) {
         val currentTime = System.currentTimeMillis()
+        val prev = previousLocation
 
-        previousLocation?.let { prev ->
-            val distanceInMeters = calculateDistance(
+        currentSpeed = when {
+            location.hasSpeed() -> location.speed
+            prev != null -> {
+                val meters = calculateDistance(
+                    prev.latitude, prev.longitude,
+                    location.latitude, location.longitude
+                )
+                val seconds = (currentTime - previousLocationTimestamp) / 1000f
+                if (seconds > 0) meters / seconds else currentSpeed
+            }
+            else -> 0f
+        }
+
+        currentBearing = when {
+            // The course is only trustworthy in motion
+            location.hasBearing() && currentSpeed >= LocationCadence.SPEED_STATIONARY_MPS ->
+                location.bearing
+            prev != null -> calculateBearing(
                 prev.latitude, prev.longitude,
                 location.latitude, location.longitude
             )
-            val timeInSeconds = (currentTime - previousLocationTimestamp) / 1000f
-            if (timeInSeconds > 0) {
-                currentSpeed = distanceInMeters / timeInSeconds // meters per second
-                Timber.d("Current speed: $currentSpeed m/s (${currentSpeed * 3.6} km/h)")
-            }
+            else -> currentBearing
         }
 
-        // Store current location for next calculation
         previousLocation = location
         previousLocationTimestamp = currentTime
-    }
-
-    /**
-     * Update location request based on current speed.
-     */
-    private fun updateLocationRequestBasedOnSpeed() {
-        // Determine appropriate interval based on speed
-        val interval = when {
-            currentSpeed < SPEED_STATIONARY -> INTERVAL_LOW_POWER
-            currentSpeed < SPEED_WALKING -> INTERVAL_BALANCED
-            currentSpeed < SPEED_DRIVING_SLOW -> INTERVAL_HIGH_POWER
-            else -> INTERVAL_HIGH_POWER / 2 // Even faster updates for high speed
-        }
-        requestUpdatesWithInterval(interval)
     }
 
     /**
@@ -205,26 +200,9 @@ class LocationAwarenessServiceImpl @Inject constructor(
     private fun processNewLocation(location: Location, defaultRadius: Int) {
         val currentTime = System.currentTimeMillis()
 
-        // Calculate speed and direction if we have a previous location
-        val speed = previousLocation?.let { prev ->
-            val distanceInMeters = calculateDistance(
-                prev.latitude, prev.longitude,
-                location.latitude, location.longitude
-            )
-            val timeInSeconds = (currentTime - previousLocationTimestamp) / 1000f
-            distanceInMeters / timeInSeconds // meters per second
-        } ?: 0f
-
-        val bearing = previousLocation?.let { prev ->
-            calculateBearing(
-                prev.latitude, prev.longitude,
-                location.latitude, location.longitude
-            )
-        } ?: 0f
-
-        // Store current location for next calculation
-        previousLocation = location
-        previousLocationTimestamp = currentTime
+        // Motion computed once per fix by updateMotion()
+        val speed = currentSpeed
+        val bearing = currentBearing
 
         // Check all monitored POIs
         for ((poiId, poi) in monitoredPointsOfInterest) {
@@ -340,6 +318,8 @@ class LocationAwarenessServiceImpl @Inject constructor(
         previousLocation = null
         previousLocationTimestamp = 0
         currentSpeed = 0f
+        currentBearing = 0f
+        requestedIntervalMs = 0L
         geofenceEntryTimes.clear()
         dwellNotified.clear()
     }

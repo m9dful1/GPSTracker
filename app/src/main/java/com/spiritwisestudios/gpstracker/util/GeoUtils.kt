@@ -1,6 +1,7 @@
 package com.spiritwisestudios.gpstracker.util
 
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
+import kotlin.math.asin
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -45,6 +46,24 @@ object GeoUtils {
                 center.longitude + lonRadius * cos(angle)
             )
         }
+    }
+
+    /**
+     * The point [distanceMeters] away from [start] along [bearingDegrees]
+     * (great-circle destination point).
+     */
+    fun offsetMeters(start: LatLng, bearingDegrees: Float, distanceMeters: Float): LatLng {
+        val angular = distanceMeters / EARTH_RADIUS_METERS
+        val bearing = Math.toRadians(bearingDegrees.toDouble())
+        val lat1 = Math.toRadians(start.latitude)
+        val lon1 = Math.toRadians(start.longitude)
+
+        val lat2 = asin(sin(lat1) * cos(angular) + cos(lat1) * sin(angular) * cos(bearing))
+        val lon2 = lon1 + atan2(
+            sin(bearing) * sin(angular) * cos(lat1),
+            cos(angular) - sin(lat1) * sin(lat2)
+        )
+        return LatLng(Math.toDegrees(lat2), Math.toDegrees(lon2))
     }
 
     /**

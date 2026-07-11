@@ -7,6 +7,8 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.Looper
 import androidx.core.location.LocationListenerCompat
+import androidx.core.location.LocationManagerCompat
+import androidx.core.location.LocationRequestCompat
 import timber.log.Timber
 
 /**
@@ -39,7 +41,10 @@ class FrameworkLocationClient(context: Context) {
     /**
      * Stream location updates to [listener] on the main looper. Calling
      * again with the same listener re-registers it with the new interval
-     * and displacement.
+     * and displacement. Fixes are delivered the moment the provider
+     * produces them ([LocationRequestCompat.Builder.setMinUpdateIntervalMillis]
+     * of zero) — the legacy minTime API instead throttles delivery to the
+     * interval boundary, adding up to a full interval of latency per fix.
      */
     @SuppressLint("MissingPermission")
     fun requestUpdates(
@@ -47,11 +52,16 @@ class FrameworkLocationClient(context: Context) {
         minDistanceMeters: Float,
         listener: LocationListenerCompat
     ) {
+        val request = LocationRequestCompat.Builder(minIntervalMs)
+            .setQuality(LocationRequestCompat.QUALITY_HIGH_ACCURACY)
+            .setMinUpdateIntervalMillis(0)
+            .setMinUpdateDistanceMeters(minDistanceMeters)
+            .build()
         try {
-            locationManager.requestLocationUpdates(
+            LocationManagerCompat.requestLocationUpdates(
+                locationManager,
                 bestProvider(),
-                minIntervalMs,
-                minDistanceMeters,
+                request,
                 listener,
                 Looper.getMainLooper()
             )
@@ -61,7 +71,7 @@ class FrameworkLocationClient(context: Context) {
     }
 
     fun removeUpdates(listener: LocationListenerCompat) {
-        locationManager.removeUpdates(listener)
+        LocationManagerCompat.removeUpdates(locationManager, listener)
     }
 
     /** The freshest fix any provider has, or null when there is none yet. */

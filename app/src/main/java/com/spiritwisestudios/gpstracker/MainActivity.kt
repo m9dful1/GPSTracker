@@ -210,6 +210,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         // and offset CameraLogic's Google-tuned zoom curve.
         private const val FOLLOW_ZOOM = 17.0
         private const val ZOOM_OFFSET = 1f
+
+        // A cached fix older than this is more likely misleading than helpful
+        private const val MAX_SEED_AGE_MS = 10 * 60 * 1000L
     }
 
     /** Domain coordinates → MapLibre coordinates at the map boundary. */
@@ -767,8 +770,25 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     // Set up a location request for frequent updates
     private fun startLocationUpdates() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            // Every second / 1 meter for smooth movement
-            locationClient.requestUpdates(1000, 1f, locationListener)
+            // Place the map on the freshest cached fix right away instead of
+            // sitting empty while the first live fix is acquired. Position
+            // only: the cached speed and bearing are stale and would engage
+            // the driving camera from a previous drive.
+            if (isFirstUpdate) {
+                locationClient.lastKnownLocation()
+                    ?.takeIf { System.currentTimeMillis() - it.time <= MAX_SEED_AGE_MS }
+                    ?.let { cached ->
+                        val seed = Location(cached.provider ?: "").apply {
+                            latitude = cached.latitude
+                            longitude = cached.longitude
+                            time = cached.time
+                        }
+                        locationListener.onLocationChanged(seed)
+                    }
+            }
+            // Every second, no displacement filter — a distance gate only
+            // delays delivery, and still fixes are cheap to handle
+            locationClient.requestUpdates(1000, 0f, locationListener)
         }
     }
 
@@ -1163,17 +1183,33 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             locationHistory.removeFirst()
         }
 
+        // A fix shows where the user was; by the time the ease lands they
+        // are one ease further down the road. Aim there, not at the fix,
+        // so the view doesn't permanently trail reality. The puck itself
+        // stays on the true fix.
+        val bearing = getUserBearing()
+        val lead = CameraLogic.cameraLeadMeters(lastKnownSpeedMps)
+        val target = if (lead > 0f) {
+            GeoUtils.offsetMeters(currentLocation, bearing, lead)
+        } else {
+            currentLocation
+        }
+
         val cameraPosition = CameraPosition.Builder()
-            .target(currentLocation.toMap())
+            .target(target.toMap())
             .zoom((CameraLogic.zoomForSpeed(lastKnownSpeedMps) - ZOOM_OFFSET).toDouble())
-            .bearing(getUserBearing().toDouble())
+            .bearing(bearing.toDouble())
             .tilt(CameraLogic.DRIVING_TILT)
             .padding(0.0, mapView.height / 3.0, 0.0, 0.0)
             .build()
 
         // Linear ease matched to the 1 s location cadence, so the camera
         // glides between fixes instead of lurching
-        mMap.easeCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 1000, false)
+        mMap.easeCamera(
+            CameraUpdateFactory.newCameraPosition(cameraPosition),
+            CameraLogic.CAMERA_EASE_MS,
+            false
+        )
     }
 
     // Settle back to the flat, north-up follow view once a drive ends

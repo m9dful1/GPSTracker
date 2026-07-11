@@ -20,6 +20,12 @@ object CameraLogic {
     /** Slow fixes tolerated before the driving view lets go (~20 s at 1 fix/s). */
     const val STILL_FIXES_TO_RELEASE = 20
 
+    /** How long the driving camera's ease runs between fixes. */
+    const val CAMERA_EASE_MS = 1000
+
+    /** Never lead the camera further than this, however fast the GPS claims. */
+    const val MAX_CAMERA_LEAD_METERS = 40f
+
     /**
      * Navigation zoom glides with speed: closer when slow (the next turn
      * matters), wider when fast (the road far ahead matters). Continuous
@@ -30,6 +36,18 @@ object CameraLogic {
         val speedKmh = speedMetersPerSecond.coerceAtLeast(0f) * 3.6f
         val fractionOfTopSpeed = (speedKmh / 100f).coerceIn(0f, 1f)
         return MAX_ZOOM - (MAX_ZOOM - MIN_ZOOM) * fractionOfTopSpeed
+    }
+
+    /**
+     * How far ahead of the last fix to aim the driving camera. A fix shows
+     * where the user *was*, and by the time the ease finishes they have
+     * moved another second down the road — so the camera trails reality by
+     * roughly one ease. Leading the target by one ease-worth of travel
+     * makes the view land where the user actually is.
+     */
+    fun cameraLeadMeters(speedMetersPerSecond: Float): Float {
+        return (speedMetersPerSecond.coerceAtLeast(0f) * CAMERA_EASE_MS / 1000f)
+            .coerceAtMost(MAX_CAMERA_LEAD_METERS)
     }
 
     /**

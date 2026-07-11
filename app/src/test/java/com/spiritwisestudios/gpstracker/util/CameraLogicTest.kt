@@ -39,6 +39,31 @@ class CameraLogicTest {
     }
 
     @Test
+    fun `camera lead covers one ease-worth of travel`() {
+        // 13 m/s over the 1 s ease → aim 13 m ahead
+        assertEquals(13f, CameraLogic.cameraLeadMeters(13f), 0.01f)
+    }
+
+    @Test
+    fun `camera lead is zero when stationary`() {
+        assertEquals(0f, CameraLogic.cameraLeadMeters(0f), 0f)
+    }
+
+    @Test
+    fun `camera lead ignores negative GPS speed`() {
+        assertEquals(0f, CameraLogic.cameraLeadMeters(-5f), 0f)
+    }
+
+    @Test
+    fun `camera lead is capped for implausible speeds`() {
+        assertEquals(
+            CameraLogic.MAX_CAMERA_LEAD_METERS,
+            CameraLogic.cameraLeadMeters(500f),
+            0f
+        )
+    }
+
+    @Test
     fun `driving view engages at driving speed`() {
         val gate = CameraLogic.DrivingCameraGate()
         assertTrue(gate.onSpeed(10f))

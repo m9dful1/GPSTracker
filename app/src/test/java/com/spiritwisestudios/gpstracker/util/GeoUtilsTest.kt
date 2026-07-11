@@ -39,4 +39,33 @@ class GeoUtilsTest {
         val end = LatLng(37.0, -122.0)
         assertEquals(180f, GeoUtils.bearingDegrees(start, end), 0.5f)
     }
+
+    @Test
+    fun `offset lands the requested distance away`() {
+        val start = LatLng(37.7749, -122.4194)
+        val moved = GeoUtils.offsetMeters(start, 63f, 500f)
+        assertEquals(500f, GeoUtils.distanceMeters(start, moved), 1f)
+    }
+
+    @Test
+    fun `offset lands on the requested bearing`() {
+        val start = LatLng(37.7749, -122.4194)
+        val moved = GeoUtils.offsetMeters(start, 63f, 500f)
+        assertEquals(63f, GeoUtils.bearingDegrees(start, moved), 0.5f)
+    }
+
+    @Test
+    fun `offset due north only changes latitude`() {
+        val start = LatLng(37.0, -122.0)
+        val moved = GeoUtils.offsetMeters(start, 0f, 1000f)
+        assertEquals(start.longitude, moved.longitude, 1e-6)
+        assertEquals(start.latitude + 1000.0 / 111_195.0, moved.latitude, 1e-4)
+    }
+
+    @Test
+    fun `zero offset stays put`() {
+        val start = LatLng(37.0, -122.0)
+        val moved = GeoUtils.offsetMeters(start, 90f, 0f)
+        assertEquals(0f, GeoUtils.distanceMeters(start, moved), 0.01f)
+    }
 }
