@@ -5,14 +5,9 @@ import android.content.Context
 import android.location.Geocoder
 import android.location.Location
 import android.os.Build
-import android.os.Looper
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
-import com.google.android.gms.maps.model.LatLng
+import androidx.core.location.LocationListenerCompat
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
+import com.spiritwisestudios.gpstracker.data.api.RoutingApiService
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CoroutineScope
@@ -22,48 +17,28 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.suspendCancellableCoroutine
 import timber.log.Timber
 import java.util.Locale
 import javax.inject.Inject
-import kotlin.coroutines.resume
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlin.math.sqrt
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlin.math.abs
-import kotlin.math.roundToInt
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import org.json.JSONException
-import com.spiritwisestudios.gpstracker.BuildConfig
 import com.spiritwisestudios.gpstracker.util.DistanceFormatter
-import com.spiritwisestudios.gpstracker.util.Polyline
 import java.io.IOException
 import android.graphics.Color
 
 class NavigationServiceImpl @Inject constructor(
-    private val context: Context
+    private val context: Context,
+    private val routingApiService: RoutingApiService
 ) : NavigationService {
 
-    private val fusedLocationClient: FusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(context)
+    private val locationClient = FrameworkLocationClient(context)
     private val geocoder: Geocoder = Geocoder(context, Locale.getDefault())
     private val navigationState = MutableStateFlow<NavigationState>(NavigationState.Inactive)
-    private val httpClient = OkHttpClient()
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    
-    // Add location callback and request
-    private var locationCallback: LocationCallback? = null
-    private var locationRequest: LocationRequest? = null
+
+    // Listener for live navigation location updates
+    private var locationListener: LocationListenerCompat? = null
     private var lastRecalculationTimestampMs: Long = 0L
 
     // Bumped whenever a route is (re)calculated; stamped onto every status
@@ -110,8 +85,8 @@ class NavigationServiceImpl @Inject constructor(
                     currentLocation = currentLatLng
                 )
                 
-                // Get route from Routes API
-                val routeResult = getRouteFromRoutesApi(currentLatLng, destination, waypoints)
+                // Get route from the routing service
+                val routeResult = getRoute(currentLatLng, destination, waypoints)
                 
                 if (routeResult != null) {
                     // Update navigation state with calculated values and route
@@ -193,32 +168,18 @@ class NavigationServiceImpl @Inject constructor(
     /**
      * Set up location updates for continuous navigation
      */
-    @SuppressLint("MissingPermission")
     private fun setupLocationUpdates(emitStatus: (NavigationService.NavigationStatus) -> Unit) {
         try {
-            // Create location request
-            locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)  // 5 seconds
-                .setMinUpdateDistanceMeters(5f)  // 5 meters
-                .setWaitForAccurateLocation(false)
-                .build()
-            
-            // Create location callback
-            locationCallback = object : LocationCallback() {
-                override fun onLocationResult(locationResult: LocationResult) {
-                    locationResult.lastLocation?.let { location ->
-                        // Update with new location
-                        updateNavigation(LatLng(location.latitude, location.longitude), emitStatus)
-                    }
-                }
+            // Create location listener
+            val listener = LocationListenerCompat { location ->
+                // Update with new location
+                updateNavigation(LatLng(location.latitude, location.longitude), emitStatus)
             }
-            
-            // Request location updates
-            fusedLocationClient.requestLocationUpdates(
-                locationRequest!!,
-                locationCallback!!,
-                Looper.getMainLooper()
-            )
-            
+            locationListener = listener
+
+            // Request location updates: every 5 seconds / 5 meters
+            locationClient.requestUpdates(5000, 5f, listener)
+
             Timber.d("Started location updates for navigation")
         } catch (e: SecurityException) {
             Timber.e(e, "Location permission denied for navigation updates")
@@ -226,17 +187,16 @@ class NavigationServiceImpl @Inject constructor(
             Timber.e(e, "Error setting up location updates")
         }
     }
-    
+
     /**
      * Stop location updates
      */
     private fun stopLocationUpdates() {
-        locationCallback?.let {
-            fusedLocationClient.removeLocationUpdates(it)
-            locationCallback = null
+        locationListener?.let {
+            locationClient.removeUpdates(it)
+            locationListener = null
             Timber.d("Stopped location updates for navigation")
         }
-        locationRequest = null
     }
     
     /**
@@ -280,7 +240,7 @@ class NavigationServiceImpl @Inject constructor(
                 val dest = currentState.destination
                 if (dest != null) {
                     serviceScope.launch {
-                        val routeResult = getRouteFromRoutesApi(newLocation, dest, currentState.waypoints)
+                        val routeResult = getRoute(newLocation, dest, currentState.waypoints)
                         if (routeResult != null) {
                             currentRouteVersion++
                             navigationState.value = navigationState.value.copy(
@@ -471,182 +431,35 @@ class NavigationServiceImpl @Inject constructor(
     }
     
     /**
-     * Get route information from the Routes API (computeRoutes). The legacy
-     * Directions API is unavailable to new Cloud projects.
+     * Get route information from the routing service (Valhalla over
+     * OpenStreetMap data — no Google API involved).
      */
-    private suspend fun getRouteFromRoutesApi(
+    private suspend fun getRoute(
         origin: LatLng,
         destination: LatLng,
         waypoints: List<LatLng> = emptyList()
-    ): RouteResult? = withContext(Dispatchers.IO) {
+    ): RouteResult? {
         // Check network connectivity first
         if (!isNetworkAvailable()) {
             Timber.e("No network connection available for route calculation")
-            return@withContext null
+            return null
         }
 
-        try {
-            val apiKey = BuildConfig.MAPS_API_KEY
+        Timber.d(
+            "Requesting route: origin=${origin.latitude},${origin.longitude} " +
+                    "destination=${destination.latitude},${destination.longitude} waypoints=${waypoints.size}"
+        )
 
-            // Validate API key (never log the key itself)
-            if (!isValidApiKey(apiKey)) {
-                Timber.e("Google Maps API key is missing or malformed — check MAPS_API_KEY in local.properties")
-                return@withContext null
-            }
+        val route = routingApiService.getRoute(origin, destination, waypoints) ?: return null
 
-            fun waypointJson(point: LatLng) = JSONObject().put(
-                "location", JSONObject().put(
-                    "latLng", JSONObject()
-                        .put("latitude", point.latitude)
-                        .put("longitude", point.longitude)
-                )
-            )
+        Timber.d("Route with ${route.points.size} points, distance: ${route.distanceMeters}m, duration: ${route.durationMillis}ms, ${route.instructions.size} instructions")
 
-            val requestJson = JSONObject().apply {
-                put("origin", waypointJson(origin))
-                put("destination", waypointJson(destination))
-                if (waypoints.isNotEmpty()) {
-                    put("intermediates", JSONArray(waypoints.map { waypointJson(it) }))
-                }
-                put("travelMode", "DRIVE")
-                put("routingPreference", "TRAFFIC_AWARE")
-                put("units", "IMPERIAL")
-            }
-
-            Timber.d(
-                "Making Routes API request: origin=${origin.latitude},${origin.longitude} " +
-                        "destination=${destination.latitude},${destination.longitude} waypoints=${waypoints.size}"
-            )
-
-            // The field mask is required; request only what the parser reads
-            val request = Request.Builder()
-                .url("https://routes.googleapis.com/directions/v2:computeRoutes")
-                .header("X-Goog-Api-Key", apiKey)
-                .header(
-                    "X-Goog-FieldMask",
-                    "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline," +
-                            "routes.legs.steps.distanceMeters,routes.legs.steps.startLocation," +
-                            "routes.legs.steps.navigationInstruction"
-                )
-                .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-
-            httpClient.newCall(request).execute().use { response ->
-                Timber.d("Routes API response code: ${response.code}")
-
-                val responseData = response.body?.string()
-
-                if (!response.isSuccessful) {
-                    val errorMessage = responseData?.let {
-                        try {
-                            JSONObject(it).optJSONObject("error")?.optString("message")
-                        } catch (e: JSONException) {
-                            null
-                        }
-                    }
-                    Timber.e("Routes API request failed: ${response.code} - ${errorMessage ?: response.message}")
-                    return@withContext null
-                }
-
-                if (responseData.isNullOrEmpty()) {
-                    Timber.e("Empty response from Routes API")
-                    return@withContext null
-                }
-
-                // Log first part of the response (truncated for brevity)
-                Timber.d("Routes API raw response: ${responseData.take(500)}...")
-
-                // Parse the response
-                val jsonResponse = JSONObject(responseData)
-                val routes = jsonResponse.optJSONArray("routes")
-
-                if (routes == null || routes.length() == 0) {
-                    Timber.e("No routes found in Routes API response")
-                    return@withContext null
-                }
-                Timber.d("Routes API returned ${routes.length()} route(s)")
-
-                val route = routes.getJSONObject(0)
-                val legs = route.getJSONArray("legs")
-                Timber.d("First route has ${legs.length()} leg(s)")
-
-                val totalDistance = route.optInt("distanceMeters")
-                // Durations serialize as seconds with an "s" suffix, e.g. "1234s"
-                val totalDuration =
-                    (route.optString("duration", "0s").removeSuffix("s").toDouble() * 1000).toLong()
-
-                val instructions = mutableListOf<NavigationService.NavigationInstruction>()
-
-                for (i in 0 until legs.length()) {
-                    val steps = legs.getJSONObject(i).getJSONArray("steps")
-                    for (j in 0 until steps.length()) {
-                        val step = steps.getJSONObject(j)
-
-                        // Steps without an instruction (plain continuations) are skipped
-                        val navigationInstruction = step.optJSONObject("navigationInstruction") ?: continue
-                        val description = navigationInstruction.optString("instructions")
-                            .replace("\\s+".toRegex(), " ") // Instructions can span multiple lines
-                            .trim()
-
-                        // Get maneuver point
-                        val startLatLng = step.getJSONObject("startLocation").getJSONObject("latLng")
-                        val maneuverPoint = LatLng(
-                            startLatLng.getDouble("latitude"),
-                            startLatLng.getDouble("longitude")
-                        )
-
-                        // Determine instruction type
-                        val instructionType = when (navigationInstruction.optString("maneuver")) {
-                            "TURN_LEFT" -> NavigationService.InstructionType.TURN_LEFT
-                            "TURN_RIGHT" -> NavigationService.InstructionType.TURN_RIGHT
-                            "TURN_SLIGHT_LEFT", "FORK_LEFT" -> NavigationService.InstructionType.TURN_SLIGHT_LEFT
-                            "TURN_SLIGHT_RIGHT", "FORK_RIGHT" -> NavigationService.InstructionType.TURN_SLIGHT_RIGHT
-                            "TURN_SHARP_LEFT", "UTURN_LEFT" -> NavigationService.InstructionType.TURN_SHARP_LEFT
-                            "TURN_SHARP_RIGHT", "UTURN_RIGHT" -> NavigationService.InstructionType.TURN_SHARP_RIGHT
-                            "ROUNDABOUT_LEFT", "ROUNDABOUT_RIGHT" -> NavigationService.InstructionType.ROUNDABOUT
-                            "MERGE" -> NavigationService.InstructionType.MERGE
-                            "RAMP_LEFT", "RAMP_RIGHT" -> NavigationService.InstructionType.HIGHWAY_EXIT
-                            "DEPART" -> NavigationService.InstructionType.DEPART
-                            "FERRY", "FERRY_TRAIN" -> NavigationService.InstructionType.OTHER
-                            else -> NavigationService.InstructionType.STRAIGHT
-                        }
-
-                        // Add to instructions list
-                        instructions.add(
-                            NavigationService.NavigationInstruction(
-                                type = instructionType,
-                                distance = step.optInt("distanceMeters").toFloat(),
-                                description = description,
-                                maneuverPoint = maneuverPoint
-                            )
-                        )
-                    }
-                }
-
-                // Decode the polyline
-                val encodedPolyline = route.getJSONObject("polyline").getString("encodedPolyline")
-                val polylinePoints = Polyline.decode(encodedPolyline)
-
-                // Before returning the route result
-                Timber.d("Successfully parsed route with ${polylinePoints.size} points, distance: ${totalDistance}m, duration: ${totalDuration}ms, ${instructions.size} instructions")
-
-                return@withContext RouteResult(
-                    route = polylinePoints,
-                    distance = totalDistance.toFloat(),
-                    duration = totalDuration,
-                    instructions = instructions
-                )
-            }
-        } catch (e: IOException) {
-            Timber.e(e, "Network error when fetching route: ${e.message}")
-            return@withContext null
-        } catch (e: JSONException) {
-            Timber.e(e, "Error parsing Routes API response: ${e.message}")
-            return@withContext null
-        } catch (e: Exception) {
-            Timber.e(e, "Unexpected error getting route: ${e.message}")
-            return@withContext null
-        }
+        return RouteResult(
+            route = route.points,
+            distance = route.distanceMeters,
+            duration = route.durationMillis,
+            instructions = route.instructions
+        )
     }
     
     /**
@@ -685,19 +498,12 @@ class NavigationServiceImpl @Inject constructor(
     }
 
     @SuppressLint("MissingPermission")
-    private suspend fun getCurrentLocation(): Location? = suspendCancellableCoroutine { continuation ->
-        try {
-            fusedLocationClient.lastLocation
-                .addOnSuccessListener { location ->
-                    continuation.resume(location)
-                }
-                .addOnFailureListener { e ->
-                    Timber.e(e, "Error getting current location")
-                    continuation.resume(null)
-                }
+    private suspend fun getCurrentLocation(): Location? {
+        return try {
+            locationClient.lastKnownLocation()
         } catch (e: SecurityException) {
             Timber.e(e, "Location permission denied")
-            continuation.resume(null)
+            null
         }
     }
 
@@ -768,25 +574,6 @@ class NavigationServiceImpl @Inject constructor(
             results
         )
         return results[0]
-    }
-
-    /**
-     * Check if the API key appears to be valid
-     * Note: This is a basic check - the key might still be rejected by Google
-     */
-    private fun isValidApiKey(apiKey: String): Boolean {
-        // Check if the key is empty or default placeholder
-        if (apiKey.isBlank() || apiKey == "YOUR_API_KEY_HERE") {
-            return false
-        }
-        
-        // Basic format check for Google API keys
-        // Most Google API keys are ~39 characters and start with "AIza"
-        if (!apiKey.startsWith("AIza") || apiKey.length < 30) {
-            return false
-        }
-        
-        return true
     }
 
     /**

@@ -3,7 +3,7 @@ package com.spiritwisestudios.gpstracker.data.db.entity
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
-import com.google.android.gms.maps.model.LatLng
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 
 @Entity(tableName = "points_of_interest")

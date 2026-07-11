@@ -1,7 +1,7 @@
 package com.spiritwisestudios.gpstracker.data.db.converters
 
 import androidx.room.TypeConverter
-import com.google.android.gms.maps.model.LatLng
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 

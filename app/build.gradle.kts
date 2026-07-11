@@ -1,21 +1,8 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.jetbrainsKotlinAndroid)
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
-}
-
-// The Maps/Places/Directions API key lives in local.properties (gitignored) as
-// MAPS_API_KEY=... — see app/docs/api_key_setup.md. Restrict the key in Google
-// Cloud Console; never commit it.
-val mapsApiKey: String = Properties().let { props ->
-    val localProperties = rootProject.file("local.properties")
-    if (localProperties.exists()) {
-        localProperties.inputStream().use { props.load(it) }
-    }
-    props.getProperty("MAPS_API_KEY") ?: ""
 }
 
 android {
@@ -30,9 +17,6 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
-        buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
     }
 
     buildTypes {
@@ -47,7 +31,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-        // Places SDK 4.x uses java.time, which needs desugaring below API 26
+        // java.time below API 26
         isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
@@ -71,12 +55,11 @@ dependencies {
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
     
-    // Google Maps and Location Services
-    implementation(libs.play.services.maps)
-    implementation(libs.play.services.location)
-    
-    // Places SDK (Places API New) for points of interest and autocomplete
-    implementation("com.google.android.libraries.places:places:4.4.1")
+    // MapLibre map rendering (OpenStreetMap vector tiles, no API key)
+    implementation(libs.maplibre)
+
+    // Destination search results list
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     
@@ -92,8 +75,6 @@ dependencies {
     // Kotlin coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-    // Task.await() bridging for Places SDK calls
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
     
     // Room database for local caching (using KSP instead of KAPT)
     implementation("androidx.room:room-runtime:2.6.1")

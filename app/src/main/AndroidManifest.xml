@@ -23,14 +23,6 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.GPSTracker">
 
-        <!--
-          Injected at build time from MAPS_API_KEY in local.properties.
-          See app/docs/api_key_setup.md.
-        -->
-        <meta-data
-            android:name="com.google.android.geo.API_KEY"
-            android:value="${MAPS_API_KEY}" />
-
         <activity
             android:name="com.spiritwisestudios.gpstracker.MainActivity"
             android:exported="true">
@@ -47,15 +39,5 @@
             android:exported="false"
             android:foregroundServiceType="location" />
             
-        <!-- Geofence Broadcast Receiver -->
-        <receiver
-            android:name=".receiver.GeofenceBroadcastReceiver"
-            android:enabled="true"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.spiritwisestudios.gpstracker.ACTION_GEOFENCE_TRANSITION" />
-                <action android:name="com.google.android.gms.location.GEOFENCE_TRANSITION" />
-            </intent-filter>
-        </receiver>
     </application>
 </manifest>

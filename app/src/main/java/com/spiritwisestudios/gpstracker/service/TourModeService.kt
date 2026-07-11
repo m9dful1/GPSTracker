@@ -11,7 +11,7 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import com.google.android.gms.maps.model.LatLng
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.MainActivity
 import com.spiritwisestudios.gpstracker.R
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
@@ -418,7 +418,7 @@ class TourModeService : Service() {
     }
 
     /**
-     * Handle geofence events from the GeofenceBroadcastReceiver.
+     * Handle geofence transitions forwarded by the location awareness service.
      */
     private fun handleGeofenceEvent(action: String, geofenceIds: List<String>) {
         serviceScope.launch {

@@ -1,6 +1,6 @@
 package com.spiritwisestudios.gpstracker.domain.service
 
-import com.google.android.gms.maps.model.LatLng
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import kotlinx.coroutines.flow.Flow
 
 /**

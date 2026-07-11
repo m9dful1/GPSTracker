@@ -15,7 +15,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:text="Map type"
+        android:text="Map style"
         android:textAppearance="?attr/textAppearanceSubtitle2" />
 
     <RadioGroup
@@ -32,38 +32,25 @@
             android:text="Default" />
 
         <RadioButton
-            android:id="@+id/rb_map_satellite"
+            android:id="@+id/rb_map_bright"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:minHeight="44dp"
-            android:text="Satellite" />
+            android:text="Bright" />
 
         <RadioButton
-            android:id="@+id/rb_map_terrain"
+            android:id="@+id/rb_map_minimal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:minHeight="44dp"
-            android:text="Terrain" />
+            android:text="Minimal" />
+
+        <RadioButton
+            android:id="@+id/rb_map_dark"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="44dp"
+            android:text="Dark" />
     </RadioGroup>
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:layout_marginTop="8dp"
-        android:layout_marginBottom="8dp"
-        android:background="?android:attr/listDivider" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Map details"
-        android:textAppearance="?attr/textAppearanceSubtitle2" />
-
-    <Switch
-        android:id="@+id/switch_traffic"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:minHeight="44dp"
-        android:text="Traffic" />
 
 </LinearLayout>

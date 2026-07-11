@@ -25,4 +25,17 @@ class PolylineTest {
     fun `decodes empty string to empty list`() {
         assertTrue(Polyline.decode("").isEmpty())
     }
+
+    @Test
+    fun `decodes polyline6 when given 1e6 precision`() {
+        // Same encoded deltas as the polyline5 example, so at 1e6 precision
+        // every coordinate is exactly a tenth of the documented values.
+        val points = Polyline.decode("_p~iF~ps|U_ulLnnqC_mqNvxq`@", Polyline.PRECISION_6)
+
+        assertEquals(3, points.size)
+        assertEquals(3.85, points[0].latitude, 1e-6)
+        assertEquals(-12.02, points[0].longitude, 1e-6)
+        assertEquals(4.3252, points[2].latitude, 1e-6)
+        assertEquals(-12.6453, points[2].longitude, 1e-6)
+    }
 }

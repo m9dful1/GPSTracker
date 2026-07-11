@@ -1,6 +1,6 @@
 package com.spiritwisestudios.gpstracker.util
 
-import com.google.android.gms.maps.model.LatLng
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -27,6 +27,24 @@ object GeoUtils {
 
         val c = 2 * atan2(sqrt(a), sqrt(1 - a))
         return (EARTH_RADIUS_METERS * c).toFloat()
+    }
+
+    /**
+     * Points approximating a circle around a center, for drawing circular
+     * overlays on maps whose annotation API has no circle primitive. The
+     * ring is closed (first point repeated at the end).
+     */
+    fun circlePoints(center: LatLng, radiusMeters: Double, steps: Int = 64): List<LatLng> {
+        val latRadius = Math.toDegrees(radiusMeters / EARTH_RADIUS_METERS)
+        val lonRadius = latRadius / cos(Math.toRadians(center.latitude))
+
+        return (0..steps).map { i ->
+            val angle = 2.0 * Math.PI * i / steps
+            LatLng(
+                center.latitude + latRadius * sin(angle),
+                center.longitude + lonRadius * cos(angle)
+            )
+        }
     }
 
     /**

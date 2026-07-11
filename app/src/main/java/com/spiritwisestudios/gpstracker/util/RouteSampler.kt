@@ -1,6 +1,6 @@
 package com.spiritwisestudios.gpstracker.util
 
-import com.google.android.gms.maps.model.LatLng
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
 
 /**
  * Picks evenly spaced sample points along a route polyline. Each sample point

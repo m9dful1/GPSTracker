@@ -29,22 +29,24 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.Observer
 import androidx.lifecycle.lifecycleScope
-import com.google.android.gms.location.*
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.GoogleMap
-import com.google.android.gms.maps.OnMapReadyCallback
-import com.google.android.gms.maps.SupportMapFragment
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
-import com.google.android.gms.maps.model.Circle
-import com.google.android.gms.maps.model.CircleOptions
-import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.LatLngBounds
-import com.google.android.gms.maps.model.MapStyleOptions
-import com.google.android.gms.maps.model.Marker
-import com.google.android.gms.maps.model.MarkerOptions
-import com.google.android.gms.maps.model.PolylineOptions
-import com.google.android.gms.maps.UiSettings
-import com.google.android.libraries.places.api.net.PlacesClient
+import androidx.core.location.LocationListenerCompat
+import com.spiritwisestudios.gpstracker.data.service.FrameworkLocationClient
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
+import org.maplibre.android.annotations.Marker
+import org.maplibre.android.annotations.MarkerOptions
+import org.maplibre.android.annotations.Polygon
+import org.maplibre.android.annotations.PolygonOptions
+import org.maplibre.android.annotations.PolylineOptions
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng as MapLatLng
+import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.location.LocationComponentActivationOptions
+import org.maplibre.android.location.modes.CameraMode
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.OnMapReadyCallback
+import org.maplibre.android.maps.Style
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.textfield.TextInputEditText
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
@@ -52,6 +54,7 @@ import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
 import com.spiritwisestudios.gpstracker.service.TourModeService
+import com.spiritwisestudios.gpstracker.ui.fragment.DestinationSearchBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.MapLayersBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.PlaceDetailsBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.TourJournalBottomSheet
@@ -73,38 +76,25 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
-import com.google.android.libraries.places.api.model.AutocompletePrediction
-import com.google.android.libraries.places.api.model.AutocompleteSessionToken
-import com.google.android.libraries.places.api.model.Place
-import com.google.android.libraries.places.api.net.FetchPlaceRequest
-import com.google.android.libraries.places.widget.PlaceAutocomplete
-import com.google.android.libraries.places.widget.PlaceAutocompleteActivity
-import kotlinx.coroutines.tasks.await
-import android.app.Activity
-import androidx.activity.result.contract.ActivityResultContracts
-import com.google.android.gms.common.api.Status
 import android.os.Looper
 import com.spiritwisestudios.gpstracker.util.GeoUtils
+import com.spiritwisestudios.gpstracker.util.MapStyles
+import com.spiritwisestudios.gpstracker.util.MarkerIcons
 import com.spiritwisestudios.gpstracker.util.MarkerStyling
-import com.google.android.libraries.places.api.model.RectangularBounds
 import com.spiritwisestudios.gpstracker.databinding.ActivityMainBinding
-import com.google.android.gms.maps.model.CameraPosition
 import java.util.ArrayDeque
-import android.util.Log
 
 // Removed debug-time API key logger to avoid accidental key exposure
 
 @AndroidEntryPoint
-class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarkerClickListener,
+class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMarkerClickListener,
     TurnInstructionFragment.NavigationDetailsProvider, TurnInstructionFragment.NavigationInstructionController,
-    MapLayersBottomSheet.MapLayersHost {
+    MapLayersBottomSheet.MapLayersHost, DestinationSearchBottomSheet.DestinationSearchHost {
 
-    private lateinit var mMap: GoogleMap
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private lateinit var locationCallback: LocationCallback
-
-    @Inject
-    lateinit var placesClient: PlacesClient
+    private lateinit var mapView: MapView
+    private lateinit var mMap: MapLibreMap
+    private lateinit var locationClient: FrameworkLocationClient
+    private lateinit var locationListener: LocationListenerCompat
 
     @Inject
     lateinit var userPreferencesRepository: UserPreferencesRepository
@@ -113,8 +103,14 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     private val placesViewModel: PlacesViewModel by viewModels()
 
     private val poiMarkers = mutableMapOf<String, Marker>()
+
+    // MapLibre markers have no tag slot; keyed by Marker.id instead
+    private val markerPlaceIds = mutableMapOf<Long, String>()
     private val LOCATION_PERMISSION_REQUEST = 1
     private val BACKGROUND_LOCATION_PERMISSION_REQUEST = 2
+
+    // The layers-sheet style currently applied to the map
+    private var currentMapStyle = MapStyles.DEFAULT
 
     // The in-flight navigation work (geocoding, then status collection),
     // tracked so canceling actually stops it
@@ -136,7 +132,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     private var lastPoiFetchCenter: LatLng? = null
 
     // Outline of the area scouted via map long-press, if any
-    private var scoutCircle: Circle? = null
+    private var scoutCircle: Polygon? = null
 
     // Dedup key so the same instruction isn't spoken on every location tick
     private var lastAnnouncementKey: String? = null
@@ -168,7 +164,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     lateinit var navigationService: NavigationService
     
     // Route polyline
-    private var routePolyline: com.google.android.gms.maps.model.Polyline? = null
+    private var routePolyline: org.maplibre.android.annotations.Polyline? = null
     private var destinationMarker: Marker? = null
     private var isNavigating = false
     
@@ -190,79 +186,18 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     }
 
     companion object {
-        private const val AUTOCOMPLETE_REQUEST_CODE = 1001
         private const val POI_REFETCH_DISTANCE_METERS = 300f
         private const val SCOUT_RADIUS_METERS = 750
-    }
-    
-    // ActivityResultLauncher for Places Autocomplete (New)
-    private val placesAutocompleteResult = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        when (result.resultCode) {
-            PlaceAutocompleteActivity.RESULT_OK -> {
-                result.data?.let { data ->
-                    val prediction = PlaceAutocomplete.getPredictionFromIntent(data)
-                    val sessionToken = PlaceAutocomplete.getSessionTokenFromIntent(data)
-                    if (prediction != null) {
-                        navigateToPrediction(prediction, sessionToken)
-                    }
-                }
-            }
-            PlaceAutocompleteActivity.RESULT_ERROR -> {
-                val status = result.data?.let { PlaceAutocomplete.getResultStatusFromIntent(it) }
-                Timber.e("AutocompleteError: ${status?.statusMessage}")
 
-                // Provide more helpful error messages
-                val errorMessage = when {
-                    status?.statusMessage?.contains("not authorized") == true ->
-                        "API authorization error. Please ensure Places API (New) is enabled in Google Cloud Console."
-                    status?.statusMessage?.contains("network") == true ->
-                        "Network error. Please check your connection and try again."
-                    else -> "Error: ${status?.statusMessage}"
-                }
-
-                Toast.makeText(this, errorMessage, Toast.LENGTH_LONG).show()
-            }
-            Activity.RESULT_CANCELED -> {
-                // User canceled the operation
-                Timber.d("Places autocomplete canceled by user")
-            }
-        }
+        // MapLibre renders 512px tiles, so its zoom levels sit one below
+        // Google's for the same view; these replace the old hardcoded 18f
+        // and offset CameraLogic's Google-tuned zoom curve.
+        private const val FOLLOW_ZOOM = 17.0
+        private const val ZOOM_OFFSET = 1f
     }
 
-    /**
-     * Autocomplete (New) returns a prediction (place ID + text), not a full
-     * Place — fetch the location before starting navigation. Reusing the
-     * widget's session token bills the autocomplete + fetch as one session.
-     */
-    private fun navigateToPrediction(
-        prediction: AutocompletePrediction,
-        sessionToken: AutocompleteSessionToken?
-    ) {
-        lifecycleScope.launch {
-            try {
-                val request = FetchPlaceRequest.builder(
-                    prediction.placeId,
-                    listOf(
-                        Place.Field.ID,
-                        Place.Field.DISPLAY_NAME,
-                        Place.Field.LOCATION,
-                        Place.Field.FORMATTED_ADDRESS
-                    )
-                ).apply { sessionToken?.let { setSessionToken(it) } }.build()
-
-                val place = placesClient.fetchPlace(request).await().place
-                Timber.d("Place selected: ${place.displayName} at ${place.location}")
-                startNavigationToPlace(place)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Timber.e(e, "Error processing place result")
-                Toast.makeText(this@MainActivity, "Error processing place: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
+    /** Domain coordinates → MapLibre coordinates at the map boundary. */
+    private fun LatLng.toMap() = MapLatLng(latitude, longitude)
 
     private lateinit var binding: ActivityMainBinding
 
@@ -286,34 +221,21 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         // bottom FABs and cards (gesture nav has a much smaller inset)
         applyWindowInsets()
 
-        // Verify API key setup (injected from local.properties at build time)
-        if (BuildConfig.MAPS_API_KEY.isEmpty()) {
-            Timber.e("API key is not configured")
-            Toast.makeText(
-                this,
-                "Google API key is not configured. Add MAPS_API_KEY to local.properties.",
-                Toast.LENGTH_LONG
-            ).show()
-        }
+        // Initialize the map view and request the map to be ready. The
+        // MapView needs the activity lifecycle forwarded to it (see the
+        // lifecycle overrides below).
+        mapView = binding.map
+        mapView.onCreate(savedInstanceState)
+        mapView.getMapAsync(this)
 
-        // Initialize the map fragment and request the map to be ready.
-        val mapFragment = supportFragmentManager
-            .findFragmentById(R.id.map) as SupportMapFragment
-        Timber.d("MapFragment found: $mapFragment")
-        mapFragment.getMapAsync(this)
+        // Setup the framework location client (no Play Services)
+        locationClient = FrameworkLocationClient(this)
 
-        // Setup Fused Location Provider
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-
-        // Define the callback to handle location updates
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(locationResult: LocationResult) {
-                locationResult.lastLocation?.let { location ->
-                    lastKnownSpeedMps = if (location.hasSpeed()) location.speed else 0f
-                    updateLocationOnMap(location)
-                    refreshNearbyPlacesIfNeeded()
-                }
-            }
+        // Define the listener to handle location updates
+        locationListener = LocationListenerCompat { location ->
+            lastKnownSpeedMps = if (location.hasSpeed()) location.speed else 0f
+            updateLocationOnMap(location)
+            refreshNearbyPlacesIfNeeded()
         }
         
         // Set up observers
@@ -418,7 +340,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
 
         // The search bar opens Places Autocomplete, like Google Maps
         searchBarCard.setOnClickListener {
-            launchPlacesAutocomplete()
+            launchDestinationSearch()
         }
         
         // Set up click listener for the close destination button
@@ -440,7 +362,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         findViewById<FloatingActionButton>(R.id.fab_recenter).setOnClickListener {
             isFollowingUser = true
             lastKnownLatLng?.let { pos ->
-                mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(pos, 18f))
+                mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(pos.toMap(), FOLLOW_ZOOM))
             }
         }
 
@@ -651,74 +573,86 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
     // The layers sheet reads and mutates the map through these; guarded in
     // case the sheet is somehow opened before the map is ready.
 
-    override fun currentMapType(): Int =
-        if (::mMap.isInitialized) mMap.mapType else GoogleMap.MAP_TYPE_NORMAL
+    override fun currentMapStyle(): Int = currentMapStyle
 
-    override fun isTrafficEnabled(): Boolean =
-        ::mMap.isInitialized && mMap.isTrafficEnabled
-
-    override fun onMapTypeSelected(mapType: Int) {
-        if (::mMap.isInitialized) mMap.mapType = mapType
-        lifecycleScope.launch { userPreferencesRepository.setMapType(mapType) }
+    override fun onMapStyleSelected(style: Int) {
+        currentMapStyle = style
+        if (::mMap.isInitialized) applyMapStyle(style)
+        lifecycleScope.launch { userPreferencesRepository.setMapStyle(style) }
     }
 
-    override fun onTrafficToggled(enabled: Boolean) {
-        if (::mMap.isInitialized) mMap.isTrafficEnabled = enabled
-        lifecycleScope.launch { userPreferencesRepository.setMapTrafficEnabled(enabled) }
-    }
-
-    // When the map is ready, enable location display
-    override fun onMapReady(googleMap: GoogleMap) {
+    // When the map is ready, load the style and enable location display
+    override fun onMapReady(map: MapLibreMap) {
         Timber.d("onMapReady called")
-        mMap = googleMap
-        Timber.d("GoogleMap object received: $mMap")
+        mMap = map
         mMap.setOnMarkerClickListener(this)
-        
-        // Set map loaded callback to ensure tiles render properly
-        mMap.setOnMapLoadedCallback {
-            // Map is fully loaded - force refresh of map tiles
-            val currentPosition = mMap.cameraPosition
-            Timber.d("Map fully loaded. Current position: $currentPosition")
-            mMap.moveCamera(CameraUpdateFactory.newCameraPosition(currentPosition))
-        }
-        // Enable common Google Maps UI elements
+
         mMap.uiSettings.isCompassEnabled = true
-        mMap.uiSettings.isZoomControlsEnabled = false // Keep clean; pinch to zoom
-        mMap.uiSettings.isMapToolbarEnabled = true
         mMap.uiSettings.isRotateGesturesEnabled = true
         mMap.uiSettings.isTiltGesturesEnabled = true
 
-        // Move Google's own UI (logo, compass) clear of the system bars too
+        // Move the map's own chrome (compass, logo, attribution) clear of
+        // the system bars
         ViewCompat.getRootWindowInsets(binding.root)
             ?.getInsets(WindowInsetsCompat.Type.systemBars())
-            ?.let { bars -> mMap.setPadding(0, bars.top, 0, bars.bottom) }
-
-        // The map ignores the app's DayNight theme; style it dark ourselves
-        // so night drives aren't a full-screen white blast
-        applyMapNightStyleIfNeeded()
-
-        // Restore the layers-sheet choices from the last session
-        lifecycleScope.launch {
-            val display = userPreferencesRepository.mapDisplayFlow.first()
-            mMap.mapType = display.mapType
-            mMap.isTrafficEnabled = display.trafficEnabled
-        }
+            ?.let { bars ->
+                mMap.uiSettings.setCompassMargins(
+                    mMap.uiSettings.compassMarginLeft,
+                    mMap.uiSettings.compassMarginTop + bars.top,
+                    mMap.uiSettings.compassMarginRight,
+                    mMap.uiSettings.compassMarginBottom
+                )
+                mMap.uiSettings.setLogoMargins(
+                    mMap.uiSettings.logoMarginLeft,
+                    mMap.uiSettings.logoMarginTop,
+                    mMap.uiSettings.logoMarginRight,
+                    mMap.uiSettings.logoMarginBottom + bars.bottom
+                )
+                mMap.uiSettings.setAttributionMargins(
+                    mMap.uiSettings.attributionMarginLeft,
+                    mMap.uiSettings.attributionMarginTop,
+                    mMap.uiSettings.attributionMarginRight,
+                    mMap.uiSettings.attributionMarginBottom + bars.bottom
+                )
+            }
 
         // Stop following the user when they pan/zoom manually (Google Maps
         // behavior); the recenter FAB turns following back on.
-        mMap.setOnCameraMoveStartedListener { reason ->
-            if (reason == GoogleMap.OnCameraMoveStartedListener.REASON_GESTURE) {
+        mMap.addOnCameraMoveStartedListener { reason ->
+            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
                 isFollowingUser = false
             }
         }
 
         // Long-press anywhere to scout that area for interesting places —
         // preview a destination before driving there
-        mMap.setOnMapLongClickListener { point ->
-            scoutArea(point)
+        mMap.addOnMapLongClickListener { point ->
+            scoutArea(LatLng(point.latitude, point.longitude))
+            true
         }
 
-        enableMyLocation()
+        // Restore the layers-sheet style from the last session; location
+        // display is enabled once the style has loaded
+        lifecycleScope.launch {
+            currentMapStyle = userPreferencesRepository.mapStyleFlow.first()
+            applyMapStyle(currentMapStyle)
+        }
+    }
+
+    /**
+     * Load a map style (the map renders nothing until one is set). The
+     * default style follows the system DayNight setting so night drives
+     * aren't a full-screen white blast. Markers survive style swaps, but
+     * the location component binds to a style, so it re-activates in the
+     * loaded callback.
+     */
+    private fun applyMapStyle(style: Int) {
+        val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        val styleUrl = MapStyles.styleUrl(style, nightMode == Configuration.UI_MODE_NIGHT_YES)
+
+        mMap.setStyle(Style.Builder().fromUri(styleUrl)) { loadedStyle ->
+            enableMyLocation(loadedStyle)
+        }
     }
 
     /**
@@ -728,12 +662,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
      * enough, the regular around-me refresh replaces them.
      */
     private fun scoutArea(point: LatLng) {
-        scoutCircle?.remove()
-        scoutCircle = mMap.addCircle(
-            CircleOptions()
-                .center(point)
-                .radius(SCOUT_RADIUS_METERS.toDouble())
-                .strokeWidth(2f)
+        scoutCircle?.let { mMap.removePolygon(it) }
+        // MapLibre's simple annotations have no circle; a 64-gon reads the same
+        scoutCircle = mMap.addPolygon(
+            PolygonOptions()
+                .addAll(GeoUtils.circlePoints(point, SCOUT_RADIUS_METERS.toDouble()).map { it.toMap() })
                 .strokeColor(0x8834A853.toInt())
                 .fillColor(0x1434A853)
         )
@@ -742,30 +675,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         Toast.makeText(this, "Scouting this area for interesting places…", Toast.LENGTH_SHORT).show()
     }
 
-    /**
-     * Apply the dark map style when the system is in night mode. The rest
-     * of the UI already follows the DayNight theme; the map needs explicit
-     * styling. Only affects the NORMAL map type — satellite and terrain
-     * render their own imagery.
-     */
-    private fun applyMapNightStyleIfNeeded() {
-        val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        if (nightMode != Configuration.UI_MODE_NIGHT_YES) return
-
-        try {
-            val applied = mMap.setMapStyle(
-                MapStyleOptions.loadRawResourceStyle(this, R.raw.map_style_night)
-            )
-            if (!applied) {
-                Timber.w("Night map style failed to parse")
-            }
-        } catch (e: Resources.NotFoundException) {
-            Timber.e(e, "Night map style resource missing")
-        }
-    }
-
-    // Request location permission and start location updates if permission is granted
-    private fun enableMyLocation() {
+    // Request location permission; when granted, show the blue position dot
+    // (MapLibre's location component) and start location updates
+    private fun enableMyLocation(style: Style? = if (::mMap.isInitialized) mMap.style else null) {
         Timber.d("enableMyLocation called")
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED &&
@@ -779,10 +691,23 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             )
             return
         }
-        mMap.isMyLocationEnabled = true
-        // The my-location layer brings its own top-right button; hide it —
-        // the recenter FAB already does this job (and re-engages following)
-        mMap.uiSettings.isMyLocationButtonEnabled = false
+
+        // The location component renders the blue dot; the camera stays
+        // ours (CameraMode.NONE) — following is handled explicitly
+        if (style != null && style.isFullyLoaded) {
+            try {
+                mMap.locationComponent.apply {
+                    activateLocationComponent(
+                        LocationComponentActivationOptions.builder(this@MainActivity, style).build()
+                    )
+                    isLocationComponentEnabled = true
+                    cameraMode = CameraMode.NONE
+                }
+            } catch (e: SecurityException) {
+                Timber.e(e, "Location permission lost while enabling the location component")
+            }
+        }
+
         startLocationUpdates()
     }
     
@@ -805,43 +730,34 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
 
     // Set up a location request for frequent updates
     private fun startLocationUpdates() {
-        val locationRequest = LocationRequest.create().apply {
-            interval = 1000 // Update every second for smoother movement
-            fastestInterval = 500 // Accept updates as fast as 500ms
-            maxWaitTime = 1500 // But wait at most 1.5 seconds to batch updates
-            priority = LocationRequest.PRIORITY_HIGH_ACCURACY
-            smallestDisplacement = 1f // Only update if moved at least 1 meter
-        }
-        
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
+            // Every second / 1 meter for smooth movement
+            locationClient.requestUpdates(1000, 1f, locationListener)
         }
     }
 
-    // Update the map with the new location data. The map's built-in
-    // my-location layer renders the blue position dot; we only manage the camera.
+    // Update the map with the new location data. The map's location
+    // component renders the blue position dot; we only manage the camera.
     private fun updateLocationOnMap(location: Location) {
         val newLatLng = LatLng(location.latitude, location.longitude)
         lastKnownLatLng = newLatLng
+        if (!::mMap.isInitialized) return
+
+        // The location component draws the dot from location updates we
+        // forward; MapLibre's own engine is off (CameraMode.NONE + explicit
+        // updates keeps one source of truth)
+        if (mMap.locationComponent.isLocationComponentActivated) {
+            mMap.locationComponent.forceLocationUpdate(location)
+        }
 
         if (isFirstUpdate) {
             Timber.d("First location update, animating camera with zoom")
-            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(newLatLng, 18f), object : GoogleMap.CancelableCallback {
-                override fun onFinish() {
-                    // Ensure map tiles are rendered properly after initial zoom
-                    val currentPosition = mMap.cameraPosition
-                    Timber.d("Initial camera animation finished. Current position: $currentPosition")
-                    mMap.moveCamera(CameraUpdateFactory.newCameraPosition(currentPosition))
-                }
-                override fun onCancel() {
-                    Timber.w("Initial camera animation cancelled")
-                }
-            })
+            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(newLatLng.toMap(), FOLLOW_ZOOM))
             isFirstUpdate = false
         } else if (isFollowingUser && !isNavigating) {
             // Navigation drives its own tilted/bearing camera; outside of it,
             // follow the user unless they've panned away.
-            mMap.animateCamera(CameraUpdateFactory.newLatLng(newLatLng), 1000, null)
+            mMap.animateCamera(CameraUpdateFactory.newLatLng(newLatLng.toMap()), 1000)
         }
     }
 
@@ -854,7 +770,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         if (lastFetch == null || GeoUtils.distanceMeters(lastFetch, current) > POI_REFETCH_DISTANCE_METERS) {
             lastPoiFetchCenter = current
             // Moving on replaces any scouted area with local results
-            scoutCircle?.remove()
+            scoutCircle?.let { mMap.removePolygon(it) }
             scoutCircle = null
             placesViewModel.fetchNearbyPlaces(center = current, radius = 500)
         }
@@ -887,46 +803,51 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
 
     // Display points of interest on the map
     private fun displayPointsOfInterest(places: List<PointOfInterest>) {
+        if (!::mMap.isInitialized) return
+
         // Clear existing POI markers
-        poiMarkers.values.forEach { it.remove() }
+        poiMarkers.values.forEach { mMap.removeMarker(it) }
         poiMarkers.clear()
-        
+        markerPlaceIds.clear()
+
         // Add new markers for each point of interest
         places.forEach { poi ->
-            // Only add a marker if the POI has a valid Google Place ID
+            // Only add a marker if the POI has a place id to look details up by
             poi.placeId?.let { validPlaceId ->
                 val marker = mMap.addMarker(
                     MarkerOptions()
-                        .position(poi.latLng)
+                        .position(poi.latLng.toMap())
                         .title(poi.name)
                         .snippet(if (poi.isVisited) "${poi.category} · already narrated" else poi.category)
-                        .icon(BitmapDescriptorFactory.defaultMarker(MarkerStyling.hueFor(poi.category)))
-                        .alpha(MarkerStyling.alphaFor(poi.isVisited))
+                        .icon(
+                            MarkerIcons.pin(
+                                this,
+                                MarkerStyling.hueFor(poi.category),
+                                MarkerStyling.alphaFor(poi.isVisited)
+                            )
+                        )
                 )
-                marker?.let { 
-                    poiMarkers[poi.id] = it // Keep using internal ID for the map key if needed
-                    // Store the Google Place ID in the marker's tag for API calls
-                    it.tag = validPlaceId
-                }
+                poiMarkers[poi.id] = marker
+                // Place id for detail lookups on click (markers have no tag slot)
+                markerPlaceIds[marker.id] = validPlaceId
             } ?: run {
                 // Log POIs without a placeId - might indicate an issue upstream
                 Timber.w("Point of Interest '${poi.name}' (ID: ${poi.id}) has no placeId, skipping detail marker setup.")
-                // Optionally add a non-clickable marker or different style marker here
             }
         }
     }
 
     // Handle marker clicks to show point of interest details
     override fun onMarkerClick(marker: Marker): Boolean {
-        // Get the Google Place ID from the marker's tag
-        val placeId = marker.tag as? String ?: return false
-        
-        // Select the place using the correct Google Place ID to show details
-        placesViewModel.selectPlace(placeId) // Pass the correct placeId
-        
+        // Get the place id remembered for this marker
+        val placeId = markerPlaceIds[marker.id] ?: return false
+
+        // Select the place to show details
+        placesViewModel.selectPlace(placeId)
+
         // Show the bottom sheet with place details
         showPlaceDetailsBottomSheet()
-        
+
         return true // Return true to consume the event (don't show the info window)
     }
     
@@ -936,32 +857,58 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         bottomSheet.show(supportFragmentManager, PlaceDetailsBottomSheet.TAG)
     }
 
+    // The MapView renders with its own GL surface and needs the activity
+    // lifecycle forwarded to it explicitly (the old map fragment did this
+    // for itself).
+    override fun onStart() {
+        super.onStart()
+        mapView.onStart()
+    }
+
     // Stop location updates when the activity is paused to save battery
     override fun onPause() {
         super.onPause()
-        fusedLocationClient.removeLocationUpdates(locationCallback)
+        mapView.onPause()
+        locationClient.removeUpdates(locationListener)
     }
-    
+
     // Resume location updates when the activity is resumed
     override fun onResume() {
         super.onResume()
+        mapView.onResume()
         if (!isFirstUpdate) {
             startLocationUpdates()
         }
     }
-    
+
+    override fun onStop() {
+        super.onStop()
+        mapView.onStop()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        mapView.onSaveInstanceState(outState)
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        mapView.onLowMemory()
+    }
+
     // Clean up resources when the activity is destroyed
     override fun onDestroy() {
         // Stop navigation if active
         if (isNavigating) {
             navigationService.stopNavigation()
         }
-        
+
         // Unbind from the service if bound
         if (tourModeService != null) {
             unbindService(serviceConnection)
             tourModeService = null
         }
+        mapView.onDestroy()
         super.onDestroy()
     }
 
@@ -1040,21 +987,14 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         }
     }
     
-    // Start navigation to a selected Place
-    private fun startNavigationToPlace(place: Place) {
-        // Make sure we have the lat/lng
-        val destinationLatLng = place.location
-        if (destinationLatLng != null) {
-            // Format display name
-            val displayName = place.displayName ?: place.formattedAddress ?: "Selected destination"
-            
-            // Start common navigation setup
-            navigationJob?.cancel()
-            navigationJob = lifecycleScope.launch {
-                startActiveNavigation(destinationLatLng, displayName)
-            }
-        } else {
-            Toast.makeText(this, "Selected place has no location coordinates", Toast.LENGTH_SHORT).show()
+    // DestinationSearchHost: bias search results toward where the user is
+    override fun searchLocationBias(): LatLng? = lastKnownLatLng
+
+    // DestinationSearchHost: a search result was picked — navigate to it
+    override fun onDestinationSelected(name: String, latLng: LatLng) {
+        navigationJob?.cancel()
+        navigationJob = lifecycleScope.launch {
+            startActiveNavigation(latLng, name)
         }
     }
 
@@ -1139,41 +1079,37 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
             // Only proceed if we have no polyline yet or new route points
             if (routePolyline == null && routePoints.isNotEmpty()) {
                 Timber.d("Drawing route with ${routePoints.size} points from navigation service")
-                
-                // Clear any existing route
-                routePolyline?.remove()
-                
+
                 // Get current location and destination
                 val currentLocation = lastKnownLatLng ?: return
                 val destination = routePoints.lastOrNull() ?: return
-                
+
                 // Make sure destination marker exists
                 if (destinationMarker == null) {
                     destinationMarker = mMap.addMarker(
                         MarkerOptions()
-                            .position(destination)
+                            .position(destination.toMap())
                             .title("Destination")
-                            .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
+                            .icon(MarkerIcons.pin(this, MarkerStyling.HUE_RED))
                     )
                 }
-                
+
                 // Draw the route
                 routePolyline = mMap.addPolyline(
                     PolylineOptions()
-                        .addAll(routePoints)
-                        .width(7f)
+                        .addAll(routePoints.map { it.toMap() })
+                        .width(4f)
                         .color(0xFF0080FF.toInt()) // Bright blue
-                        .geodesic(true)
                 )
-                
+
                 // Move camera to show the route
                 val boundsBuilder = LatLngBounds.Builder()
-                    .include(currentLocation)
-                    .include(destination)
-                
+                    .include(currentLocation.toMap())
+                    .include(destination.toMap())
+
                 // Add route points to bounds
-                routePoints.forEach { boundsBuilder.include(it) }
-                
+                routePoints.forEach { boundsBuilder.include(it.toMap()) }
+
                 val bounds = boundsBuilder.build()
                 mMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 100))
             }
@@ -1196,12 +1132,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         // Move camera to follow current location with some bearing and tilt;
         // zoom widens with speed so highway driving shows the road ahead
         val cameraPosition = CameraPosition.Builder()
-            .target(currentLocation)
-            .zoom(CameraLogic.zoomForSpeed(lastKnownSpeedMps))
-            .bearing(getUserBearing())
-            .tilt(45f)
+            .target(currentLocation.toMap())
+            .zoom((CameraLogic.zoomForSpeed(lastKnownSpeedMps) - ZOOM_OFFSET).toDouble())
+            .bearing(getUserBearing().toDouble())
+            .tilt(45.0)
             .build()
-            
+
         mMap.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
     }
     
@@ -1357,9 +1293,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         searchBarCard.visibility = View.VISIBLE
 
         // Remove route from map
-        routePolyline?.remove()
+        routePolyline?.let { mMap.removePolyline(it) }
         routePolyline = null
-        destinationMarker?.remove()
+        destinationMarker?.let { mMap.removeMarker(it) }
         destinationMarker = null
 
         // Stop navigation service
@@ -1373,31 +1309,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, GoogleMap.OnMarker
         lastAnnouncementKey = null
     }
 
-    // Launch Places Autocomplete (New). No type filter: users can search
-    // businesses and street addresses alike, matching Google Maps behavior.
-    private fun launchPlacesAutocomplete() {
-        try {
-            // Get current location to use as bias
-            val currentLatLng = lastKnownLatLng ?: LatLng(0.0, 0.0)
-
-            // Create a bias rectangle around current location - approx 10km radius
-            val bias = RectangularBounds.newInstance(
-                LatLng(currentLatLng.latitude - 0.1, currentLatLng.longitude - 0.1),
-                LatLng(currentLatLng.latitude + 0.1, currentLatLng.longitude + 0.1)
-            )
-
-            val intent = PlaceAutocomplete.createIntent(this) {
-                setLocationBias(bias)
-                setCountries(listOf("US")) // Limit to US for more relevant results
-            }
-
-            placesAutocompleteResult.launch(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Error launching places autocomplete: ${e.message}", Toast.LENGTH_SHORT).show()
-            Timber.e(e, "Error launching places autocomplete")
-            
-            // Fall back to manual input if autocomplete fails
-            showDestinationInput()
+    // Open the destination search sheet (Photon geocoder — no Google APIs).
+    // No type filter: users can search businesses and street addresses alike.
+    private fun launchDestinationSearch() {
+        if (supportFragmentManager.findFragmentByTag(DestinationSearchBottomSheet.TAG) == null) {
+            DestinationSearchBottomSheet.newInstance()
+                .show(supportFragmentManager, DestinationSearchBottomSheet.TAG)
         }
     }
 }

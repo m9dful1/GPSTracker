@@ -1,10 +1,9 @@
 package com.spiritwisestudios.gpstracker.di
 
 import android.content.Context
-import com.google.android.libraries.places.api.Places
-import com.google.android.libraries.places.api.net.PlacesClient
-import com.spiritwisestudios.gpstracker.BuildConfig
+import com.spiritwisestudios.gpstracker.data.api.GeocodingApiService
 import com.spiritwisestudios.gpstracker.data.api.PlacesApiService
+import com.spiritwisestudios.gpstracker.data.api.RoutingApiService
 import com.spiritwisestudios.gpstracker.data.api.WikipediaApiService
 import com.spiritwisestudios.gpstracker.data.db.AppDatabase
 import com.spiritwisestudios.gpstracker.data.db.dao.PointOfInterestDao
@@ -27,7 +26,6 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
-import timber.log.Timber
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
@@ -42,18 +40,6 @@ object AppModule {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .build()
-    }
-
-    @Provides
-    @Singleton
-    fun providePlacesClient(@ApplicationContext context: Context): PlacesClient {
-        if (!Places.isInitialized()) {
-            // Use the new Places API — the legacy Places API is not enabled on
-            // this project's API key.
-            Places.initializeWithNewPlacesApiEnabled(context, BuildConfig.MAPS_API_KEY)
-            Timber.d("Places SDK initialized (new Places API)")
-        }
-        return Places.createClient(context)
     }
 
     @Provides
@@ -74,14 +60,26 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun providePlacesApiService(placesClient: PlacesClient): PlacesApiService {
-        return PlacesApiService(placesClient)
+    fun providePlacesApiService(okHttpClient: OkHttpClient): PlacesApiService {
+        return PlacesApiService(okHttpClient)
     }
 
     @Provides
     @Singleton
     fun provideWikipediaApiService(okHttpClient: OkHttpClient): WikipediaApiService {
         return WikipediaApiService(okHttpClient)
+    }
+
+    @Provides
+    @Singleton
+    fun provideRoutingApiService(okHttpClient: OkHttpClient): RoutingApiService {
+        return RoutingApiService(okHttpClient)
+    }
+
+    @Provides
+    @Singleton
+    fun provideGeocodingApiService(okHttpClient: OkHttpClient): GeocodingApiService {
+        return GeocodingApiService(okHttpClient)
     }
 
     @Provides
@@ -138,8 +136,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideNavigationService(
-        @ApplicationContext context: Context
+        @ApplicationContext context: Context,
+        routingApiService: RoutingApiService
     ): NavigationService {
-        return NavigationServiceImpl(context)
+        return NavigationServiceImpl(context, routingApiService)
     }
 }

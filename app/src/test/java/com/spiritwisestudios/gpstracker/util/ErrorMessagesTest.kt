@@ -9,16 +9,6 @@ import java.util.concurrent.TimeoutException
 class ErrorMessagesTest {
 
     @Test
-    fun `api key problems point at cloud console`() {
-        val message = ErrorMessages.friendlyMessage(
-            SecurityException("Places API authorization error: API key rejected"),
-            "load nearby places"
-        )
-        assertTrue(message.contains("Cloud Console"))
-        assertTrue(message.contains("load nearby places"))
-    }
-
-    @Test
     fun `permission problems point at app settings`() {
         val message = ErrorMessages.friendlyMessage(
             SecurityException("ACCESS_FINE_LOCATION denied"),

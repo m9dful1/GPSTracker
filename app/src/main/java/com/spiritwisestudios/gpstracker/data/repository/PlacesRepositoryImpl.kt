@@ -1,6 +1,6 @@
 package com.spiritwisestudios.gpstracker.data.repository
 
-import com.google.android.gms.maps.model.LatLng
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.data.api.PlacesApiService
 import com.spiritwisestudios.gpstracker.data.db.dao.PointOfInterestDao
 import com.spiritwisestudios.gpstracker.data.db.entity.PointOfInterestEntity

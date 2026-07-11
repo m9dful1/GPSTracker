@@ -17,9 +17,6 @@ object ErrorMessages {
      */
     fun friendlyMessage(error: Throwable, whatFailed: String): String {
         return when {
-            error is SecurityException && mentionsApiKey(error) ->
-                "Couldn't $whatFailed — the Google API key isn't authorized. " +
-                    "Check the key's restrictions in Google Cloud Console."
             error is SecurityException ->
                 "Couldn't $whatFailed — location permission is missing. " +
                     "Grant it in Settings → Apps → GPSTracker → Permissions."
@@ -29,13 +26,6 @@ object ErrorMessages {
                 "Couldn't $whatFailed — no connection. Check your internet and try again."
             else ->
                 "Couldn't $whatFailed. Please try again."
-        }
-    }
-
-    private fun mentionsApiKey(error: Throwable): Boolean {
-        val message = error.message ?: return false
-        return listOf("API key", "authorization", "not authorized").any {
-            message.contains(it, ignoreCase = true)
         }
     }
 }

@@ -1,6 +1,6 @@
 package com.spiritwisestudios.gpstracker.util
 
-import com.google.android.gms.maps.model.LatLng
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import org.junit.Assert.assertEquals

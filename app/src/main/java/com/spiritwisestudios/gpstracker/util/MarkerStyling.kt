@@ -6,8 +6,8 @@ package com.spiritwisestudios.gpstracker.util
  */
 object MarkerStyling {
 
-    // Same degree values as BitmapDescriptorFactory.HUE_* (which live in the
-    // Maps SDK and would drag the Android framework into unit tests)
+    // Same degree values as the classic map-marker hues
+    const val HUE_RED = 0f
     const val HUE_ORANGE = 30f
     const val HUE_YELLOW = 60f
     const val HUE_GREEN = 120f

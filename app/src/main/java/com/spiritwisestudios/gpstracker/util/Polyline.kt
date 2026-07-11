@@ -1,16 +1,21 @@
 package com.spiritwisestudios.gpstracker.util
 
-import com.google.android.gms.maps.model.LatLng
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
 
 /**
- * Encoded polyline utilities (Google Directions API overview_polyline format).
+ * Encoded polyline utilities. The default precision (1E5) matches the classic
+ * Google/OSRM polyline5 format; Valhalla encodes shapes with six decimal
+ * digits (polyline6), so pass 1E6 for those.
  */
 object Polyline {
+
+    const val PRECISION_5 = 1E5
+    const val PRECISION_6 = 1E6
 
     /**
      * Decode an encoded polyline string into a list of LatLng points.
      */
-    fun decode(encoded: String): List<LatLng> {
+    fun decode(encoded: String, precision: Double = PRECISION_5): List<LatLng> {
         val poly = ArrayList<LatLng>()
         var index = 0
         val len = encoded.length
@@ -39,7 +44,7 @@ object Polyline {
             val dlng = if (result and 1 != 0) (result shr 1).inv() else result shr 1
             lng += dlng
 
-            poly.add(LatLng(lat.toDouble() / 1E5, lng.toDouble() / 1E5))
+            poly.add(LatLng(lat.toDouble() / precision, lng.toDouble() / precision))
         }
 
         return poly
