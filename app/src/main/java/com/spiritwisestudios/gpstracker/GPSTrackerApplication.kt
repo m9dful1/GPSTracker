@@ -1,6 +1,7 @@
 package com.spiritwisestudios.gpstracker
 
 import android.app.Application
+import com.spiritwisestudios.gpstracker.ads.AdsInitializer
 import com.spiritwisestudios.gpstracker.data.repository.MapProviderHolder
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
 import com.spiritwisestudios.gpstracker.domain.model.MapProvider
@@ -31,6 +32,9 @@ class GPSTrackerApplication : Application() {
         // MapLibre must be initialized before any MapView is inflated.
         // The OpenStreetMap tiles it renders need no API key.
         MapLibre.getInstance(this)
+
+        // Ads start after the first rendered frame so they never slow launch
+        AdsInitializer.install(this)
 
         // Seed the provider holder before any activity needs it — a blocking
         // read, but of one small DataStore file, once per process. Google

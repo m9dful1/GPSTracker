@@ -68,6 +68,12 @@
     <string name="map_provider_google">Google Maps</string>
     <string name="map_provider_google_needs_key">Add MAPS_API_KEY to local.properties to enable Google Maps</string>
 
+    <!-- Ads -->
+    <string name="ads_section">Ads</string>
+    <string name="ad_privacy_options">Ad privacy options</string>
+    <string name="ad_privacy_updated">Ad privacy preferences updated</string>
+    <string name="ad_privacy_unavailable">Ad privacy options aren\'t available right now</string>
+
     <!-- Take a Tour -->
     <string name="take_a_tour_title">Take a Tour</string>
     <string name="take_a_tour_description">Take a tour</string>

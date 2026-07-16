@@ -10,6 +10,7 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
@@ -17,6 +18,7 @@ import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.spiritwisestudios.gpstracker.BuildConfig
 import com.spiritwisestudios.gpstracker.R
+import com.spiritwisestudios.gpstracker.ads.ConsentManager
 import com.spiritwisestudios.gpstracker.data.repository.MapProviderHolder
 import com.spiritwisestudios.gpstracker.domain.model.MapProvider
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
@@ -79,6 +81,9 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
     private lateinit var rbProviderOsm: RadioButton
     private lateinit var rbProviderGoogle: RadioButton
     private lateinit var tvProviderHint: TextView
+
+    // Ads
+    private lateinit var btnAdPrivacy: Button
 
     // Buttons
     private lateinit var btnCancel: Button
@@ -166,6 +171,9 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
             MapProvider.OPEN_STREET_MAP -> rbProviderOsm.isChecked = true
         }
 
+        // Ads
+        btnAdPrivacy = view.findViewById(R.id.btn_ad_privacy)
+
         // Buttons
         btnCancel = view.findViewById(R.id.btn_cancel)
         btnSave = view.findViewById(R.id.btn_save)
@@ -218,6 +226,20 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
         
+        // Ad privacy: reopen the UMP consent form so users can change
+        // their ad consent whenever they like
+        btnAdPrivacy.setOnClickListener {
+            ConsentManager.showPrivacyOptions(requireActivity()) { shown ->
+                if (!isAdded) return@showPrivacyOptions
+                val message = if (shown) {
+                    R.string.ad_privacy_updated
+                } else {
+                    R.string.ad_privacy_unavailable
+                }
+                Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
+            }
+        }
+
         // Cancel button
         btnCancel.setOnClickListener {
             dismiss()

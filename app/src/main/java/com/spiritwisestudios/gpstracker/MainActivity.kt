@@ -29,6 +29,14 @@ import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.Observer
 import androidx.lifecycle.lifecycleScope
 import androidx.core.location.LocationListenerCompat
+import android.view.Gravity
+import android.widget.FrameLayout
+import com.google.android.gms.ads.AdListener
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
+import com.spiritwisestudios.gpstracker.ads.AdsInitializer
+import com.spiritwisestudios.gpstracker.ads.ConsentManager
+import com.spiritwisestudios.gpstracker.ads.InterstitialAdManager
 import com.spiritwisestudios.gpstracker.data.repository.MapProviderHolder
 import com.spiritwisestudios.gpstracker.data.service.FrameworkLocationClient
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
@@ -193,6 +201,11 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
     private lateinit var binding: ActivityMainBinding
 
+    // Banner ad at the foot of the bottom-card stack; created once the
+    // ads SDK and consent flow finish, hidden while guidance is active
+    private var bannerAdView: AdView? = null
+    private var bannerAdLoaded = false
+
     // Turn instruction fragment
     private var turnInstructionFragment: TurnInstructionFragment? = null
 
@@ -244,6 +257,51 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
         // Set up click listeners
         setupClickListeners()
+
+        // Banner ad, once the deferred SDK init and consent flow finish
+        setupAds()
+    }
+
+    /**
+     * Load the bottom banner after the Mobile Ads SDK is up (deferred to
+     * after the first frame) and the UMP consent flow has run — the ad
+     * request must reflect the user's consent answer.
+     */
+    private fun setupAds() {
+        AdsInitializer.whenInitialized {
+            if (isFinishing || isDestroyed) return@whenInitialized
+            ConsentManager.gatherConsent(this) {
+                if (isFinishing || isDestroyed) return@gatherConsent
+                loadBannerAd()
+            }
+        }
+    }
+
+    private fun loadBannerAd() {
+        if (bannerAdView != null) return
+        val adView = AdView(this).apply {
+            setAdSize(AdSize.BANNER)
+            adUnitId = BuildConfig.BANNER_AD_UNIT_ID
+            adListener = object : AdListener() {
+                override fun onAdLoaded() {
+                    bannerAdLoaded = true
+                    // Stay hidden during guidance; the drive's end unhides it
+                    if (navState != NavState.GUIDING) {
+                        binding.adBannerContainer.visibility = View.VISIBLE
+                    }
+                }
+            }
+        }
+        bannerAdView = adView
+        binding.adBannerContainer.addView(
+            adView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER_HORIZONTAL
+            )
+        )
+        adView.loadAd(ConsentManager.buildAdRequest())
     }
 
     private fun initializeUIElements() {
@@ -860,6 +918,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     override fun onPause() {
         super.onPause()
         map.onPause()
+        bannerAdView?.pause()
         locationClient.removeUpdates(locationListener)
     }
 
@@ -867,6 +926,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     override fun onResume() {
         super.onResume()
         map.onResume()
+        bannerAdView?.resume()
         if (!isFirstUpdate) {
             startLocationUpdates()
         }
@@ -899,6 +959,8 @@ class MainActivity : AppCompatActivity(), MapController.Host,
             unbindService(serviceConnection)
             tourModeService = null
         }
+        bannerAdView?.destroy()
+        bannerAdView = null
         map.onDestroy()
         super.onDestroy()
     }
@@ -1017,6 +1079,9 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         navState = NavState.GUIDING
         updateNavButtons()
         isFollowingUser = true
+
+        // No ads while driving; the banner comes back when the drive ends
+        binding.adBannerContainer.visibility = View.GONE
 
         // Tour narration follows the planned drive instead of the current spot
         lifecycleScope.launch {
@@ -1264,6 +1329,8 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
     // Stop navigation
     private fun stopNavigation() {
+        val wasGuiding = navState == NavState.GUIDING
+
         // Stop the in-flight work first, whether that's a geocode, a route
         // calculation, or the live status collection
         navigationJob?.cancel()
@@ -1287,6 +1354,16 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         // Clear location history and announcement state
         locationHistory.clear()
         lastAnnouncementKey = null
+
+        // The end of a drive is the one natural ad break: bring the banner
+        // back and show the preloaded interstitial (a no-op if none is
+        // ready — never make the user wait on an ad)
+        if (bannerAdLoaded) {
+            binding.adBannerContainer.visibility = View.VISIBLE
+        }
+        if (wasGuiding) {
+            InterstitialAdManager.showAd(this)
+        }
     }
 
     // Open the destination search sheet (Photon or Google Places Text

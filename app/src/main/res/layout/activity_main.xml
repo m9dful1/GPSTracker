@@ -387,5 +387,13 @@
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
+
+        <!-- Banner ad at the foot of the stack; unhidden once an ad loads
+             and hidden while navigation guidance is active -->
+        <FrameLayout
+            android:id="@+id/ad_banner_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
     </LinearLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

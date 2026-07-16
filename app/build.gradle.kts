@@ -22,6 +22,18 @@ val localProperties: Properties = Properties().apply {
 val mapsApiKey: String = localProperties.getProperty("MAPS_API_KEY") ?: ""
 val geminiApiKey: String = localProperties.getProperty("GEMINI_API_KEY") ?: ""
 
+// AdMob IDs (app/docs/ads.md). Google's public sample IDs — which only ever
+// serve test ads — fill in until real ones from an AdMob app registration
+// are added to local.properties. Debug builds always use the test ad units.
+val testBannerAdUnitId = "ca-app-pub-3940256099942544/6300978111"
+val testInterstitialAdUnitId = "ca-app-pub-3940256099942544/1033173712"
+val admobAppId: String = localProperties.getProperty("ADMOB_APP_ID")
+    ?: "ca-app-pub-3940256099942544~3347511713"
+val admobBannerAdUnitId: String =
+    localProperties.getProperty("ADMOB_BANNER_AD_UNIT_ID") ?: testBannerAdUnitId
+val admobInterstitialAdUnitId: String =
+    localProperties.getProperty("ADMOB_INTERSTITIAL_AD_UNIT_ID") ?: testInterstitialAdUnitId
+
 android {
     namespace = "com.spiritwisestudios.gpstracker"
     compileSdk = 35
@@ -36,6 +48,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
+        manifestPlaceholders["ADMOB_APP_ID"] = admobAppId
         buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
     }
@@ -47,6 +60,13 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$admobBannerAdUnitId\"")
+            buildConfigField("String", "INTERSTITIAL_AD_UNIT_ID", "\"$admobInterstitialAdUnitId\"")
+        }
+        debug {
+            // Never request real ads from a development build
+            buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$testBannerAdUnitId\"")
+            buildConfigField("String", "INTERSTITIAL_AD_UNIT_ID", "\"$testInterstitialAdUnitId\"")
         }
     }
     compileOptions {
@@ -82,6 +102,10 @@ dependencies {
     // Google Maps rendering, for the optional Google map provider
     implementation(libs.play.services.maps)
 
+    // AdMob banner + interstitial ads, with the UMP consent flow
+    implementation(libs.play.services.ads)
+    implementation(libs.user.messaging.platform)
+
     // Destination search results list
     implementation("androidx.recyclerview:recyclerview:1.3.2")
 
@@ -95,6 +119,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.7.0")
     
     // Kotlin coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
