@@ -36,11 +36,13 @@ import com.spiritwisestudios.gpstracker.domain.model.MapProvider
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
+import com.spiritwisestudios.gpstracker.domain.model.TourPlan
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
 import com.spiritwisestudios.gpstracker.service.TourModeService
 import com.spiritwisestudios.gpstracker.ui.fragment.DestinationSearchBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.MapLayersBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.PlaceDetailsBottomSheet
+import com.spiritwisestudios.gpstracker.ui.fragment.TakeATourBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.TourJournalBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.TourSettingsFragment
 import com.spiritwisestudios.gpstracker.ui.fragment.TurnInstructionFragment
@@ -71,7 +73,8 @@ import java.util.ArrayDeque
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity(), MapController.Host,
     TurnInstructionFragment.NavigationDetailsProvider, TurnInstructionFragment.NavigationInstructionController,
-    MapLayersBottomSheet.MapLayersHost, DestinationSearchBottomSheet.DestinationSearchHost {
+    MapLayersBottomSheet.MapLayersHost, DestinationSearchBottomSheet.DestinationSearchHost,
+    TakeATourBottomSheet.TakeATourHost {
 
     // The map, behind the controller for whichever provider is active —
     // MainActivity never touches a map SDK directly
@@ -271,7 +274,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
      */
     private fun applyWindowInsets() {
         val bottomViews = listOf<View>(
-            binding.fabTourMode, binding.fabRecenter,
+            binding.fabTourMode, binding.fabTakeTour, binding.fabRecenter,
             binding.fabLayers, binding.fabJournal, binding.bottomCards
         )
         // Everything top-anchored lives in one stacked column, so the
@@ -367,6 +370,14 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         findViewById<FloatingActionButton>(R.id.fab_journal).setOnClickListener {
             TourJournalBottomSheet.newInstance()
                 .show(supportFragmentManager, TourJournalBottomSheet.TAG)
+        }
+
+        // Take a Tour FAB: plan a curated sightseeing drive
+        binding.fabTakeTour.setOnClickListener {
+            if (supportFragmentManager.findFragmentByTag(TakeATourBottomSheet.TAG) == null) {
+                TakeATourBottomSheet.newInstance()
+                    .show(supportFragmentManager, TakeATourBottomSheet.TAG)
+            }
         }
 
     }
@@ -924,6 +935,23 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         }
     }
 
+    // TakeATourHost: the tour picker biases cities/search the same way
+    override fun tourLocationBias(): LatLng? = lastKnownLatLng
+
+    // TakeATourHost: a tour was planned — make sure the guide is running,
+    // then preview the loop route through the tour's stops. Tapping Start
+    // begins guidance, and the corridor registration points narration at
+    // the tour's route like any other drive.
+    override fun onTourPlanned(plan: TourPlan) {
+        if (!isTourModeActive) {
+            startTourMode()
+        }
+        navigationJob?.cancel()
+        navigationJob = lifecycleScope.launch {
+            startActiveNavigation(plan.destination, plan.name, plan.stops.map { it.latLng })
+        }
+    }
+
     /**
      * Route preview: compute the route right away and show it with a live
      * ETA, but hold guidance — voice prompts, turn cards, the chase camera —
@@ -932,7 +960,11 @@ class MainActivity : AppCompatActivity(), MapController.Host,
      * to do with the updates. Tracked in navigationJob so Cancel/End (or a
      * new destination) stops it even mid-route-calculation.
      */
-    private suspend fun startActiveNavigation(destinationLatLng: LatLng, displayName: String) {
+    private suspend fun startActiveNavigation(
+        destinationLatLng: LatLng,
+        displayName: String,
+        waypoints: List<LatLng> = emptyList()
+    ) {
         try {
             navState = NavState.PREVIEW
             updateNavButtons()
@@ -943,7 +975,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
             searchBarCard.visibility = View.GONE
 
             var corridorRouteVersion = -1
-            navigationService.startNavigation(destinationLatLng).collectLatest { status ->
+            navigationService.startNavigation(destinationLatLng, waypoints).collectLatest { status ->
                 // Also shows the next instruction when one is available
                 updateNavigationStatus(status, displayName)
 

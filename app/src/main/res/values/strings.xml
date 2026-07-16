@@ -68,6 +68,30 @@
     <string name="map_provider_google">Google Maps</string>
     <string name="map_provider_google_needs_key">Add MAPS_API_KEY to local.properties to enable Google Maps</string>
 
+    <!-- Take a Tour -->
+    <string name="take_a_tour_title">Take a Tour</string>
+    <string name="take_a_tour_description">Take a tour</string>
+    <string name="curated_tours_nearby">Curated tours nearby</string>
+    <string name="tour_start_from">Start from</string>
+    <string name="tour_current_location">Current location</string>
+    <string name="tour_search_city_hint">Or search for a city</string>
+    <string name="tour_length">Tour length</string>
+    <string name="tour_length_short">Short — about 5 miles, half an hour</string>
+    <string name="tour_length_medium">Medium — about 12 miles, around an hour</string>
+    <string name="tour_length_long">Long — about 25 miles, two hours or more</string>
+    <string name="tour_focus">Focus</string>
+    <string name="tour_focus_balanced">Balanced</string>
+    <string name="tour_focus_history">History &amp; culture</string>
+    <string name="tour_focus_nature">Nature &amp; views</string>
+    <string name="tour_focus_food">Food &amp; entertainment</string>
+    <string name="plan_tour">Plan tour</string>
+    <string name="tour_planning_places">Finding interesting places…</string>
+    <string name="tour_planning_route">Picking the best stops…</string>
+    <string name="tour_planning_no_places">Not enough interesting places found there — try a longer tour or another city</string>
+    <string name="tour_planning_failed">Couldn\'t plan the tour. Check your connection and try again.</string>
+    <string name="tour_name_format">%1$s tour</string>
+    <string name="local_tour_name">Local highlights tour</string>
+
     <!-- Tour journal sheet -->
     <string name="tour_journal_title">Tour Journal</string>
     <string name="share_journal_description">Share journal</string>

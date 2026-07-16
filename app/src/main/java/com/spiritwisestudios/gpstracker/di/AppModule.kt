@@ -8,6 +8,7 @@ import com.spiritwisestudios.gpstracker.data.api.GeocodingApiService
 import com.spiritwisestudios.gpstracker.data.api.GoogleGeocodingApiService
 import com.spiritwisestudios.gpstracker.data.api.GooglePlacesApiService
 import com.spiritwisestudios.gpstracker.data.api.GoogleRoutingApiService
+import com.spiritwisestudios.gpstracker.data.api.NearbyCityApiService
 import com.spiritwisestudios.gpstracker.data.api.PlacesApi
 import com.spiritwisestudios.gpstracker.data.api.PlacesApiService
 import com.spiritwisestudios.gpstracker.data.api.RoutingApi
@@ -152,6 +153,12 @@ object AppModule {
         googleGeocodingApiService: GoogleGeocodingApiService
     ): GeocodingApi {
         return SwitchingGeocodingApi(mapProviderHolder, geocodingApiService, googleGeocodingApiService)
+    }
+
+    @Provides
+    @Singleton
+    fun provideNearbyCityApiService(okHttpClient: OkHttpClient): NearbyCityApiService {
+        return NearbyCityApiService(okHttpClient)
     }
 
     @Provides
