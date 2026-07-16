@@ -57,6 +57,16 @@
     <string name="map_style_bright">Bright</string>
     <string name="map_style_minimal">Minimal</string>
     <string name="map_style_dark">Dark</string>
+    <string name="map_style_satellite">Satellite</string>
+    <string name="map_style_terrain">Terrain</string>
+    <string name="map_details">Map details</string>
+    <string name="map_traffic">Traffic</string>
+
+    <!-- Map provider setting -->
+    <string name="map_provider_title">Map provider</string>
+    <string name="map_provider_osm">OpenStreetMap (free, no key)</string>
+    <string name="map_provider_google">Google Maps</string>
+    <string name="map_provider_google_needs_key">Add MAPS_API_KEY to local.properties to enable Google Maps</string>
 
     <!-- Tour journal sheet -->
     <string name="tour_journal_title">Tour Journal</string>

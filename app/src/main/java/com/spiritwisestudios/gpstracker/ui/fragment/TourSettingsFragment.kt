@@ -15,7 +15,10 @@ import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.switchmaterial.SwitchMaterial
+import com.spiritwisestudios.gpstracker.BuildConfig
 import com.spiritwisestudios.gpstracker.R
+import com.spiritwisestudios.gpstracker.data.repository.MapProviderHolder
+import com.spiritwisestudios.gpstracker.domain.model.MapProvider
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
@@ -24,6 +27,7 @@ import com.spiritwisestudios.gpstracker.util.TourLogic
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import java.util.EnumSet
+import javax.inject.Inject
 
 /**
  * Fragment for configuring tour mode settings.
@@ -33,7 +37,10 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
     
     // ViewModel
     private val viewModel: PlacesViewModel by activityViewModels()
-    
+
+    @Inject
+    lateinit var mapProviderHolder: MapProviderHolder
+
     // Category CheckBoxes
     private lateinit var cbHistorical: CheckBox
     private lateinit var cbCultural: CheckBox
@@ -66,7 +73,13 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
     // Battery Usage
     private lateinit var switchPrefetchContent: SwitchMaterial
     private lateinit var switchUseMobileData: SwitchMaterial
-    
+
+    // Map Provider
+    private lateinit var rgMapProvider: RadioGroup
+    private lateinit var rbProviderOsm: RadioButton
+    private lateinit var rbProviderGoogle: RadioButton
+    private lateinit var tvProviderHint: TextView
+
     // Buttons
     private lateinit var btnCancel: Button
     private lateinit var btnSave: Button
@@ -134,7 +147,25 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         // Battery Usage
         switchPrefetchContent = view.findViewById(R.id.switch_prefetch_content)
         switchUseMobileData = view.findViewById(R.id.switch_use_mobile_data)
-        
+
+        // Map Provider
+        rgMapProvider = view.findViewById(R.id.rg_map_provider)
+        rbProviderOsm = view.findViewById(R.id.rb_provider_osm)
+        rbProviderGoogle = view.findViewById(R.id.rb_provider_google)
+        tvProviderHint = view.findViewById(R.id.tv_provider_hint)
+
+        // Google Maps needs a build-time API key; without one the option
+        // stays visible (so the feature is discoverable) but disabled
+        if (BuildConfig.MAPS_API_KEY.isBlank()) {
+            rbProviderGoogle.isEnabled = false
+            tvProviderHint.visibility = View.VISIBLE
+        }
+
+        when (mapProviderHolder.current) {
+            MapProvider.GOOGLE -> rbProviderGoogle.isChecked = true
+            MapProvider.OPEN_STREET_MAP -> rbProviderOsm.isChecked = true
+        }
+
         // Buttons
         btnCancel = view.findViewById(R.id.btn_cancel)
         btnSave = view.findViewById(R.id.btn_save)
@@ -294,7 +325,7 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         
         // Update preferences in the ViewModel
         viewModel.updateUserPreferences(updatedPreferences)
-        
+
         // Also update audio settings specifically
         lifecycleScope.launch {
             viewModel.updateAudioSettings(
@@ -304,6 +335,23 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
                 autoPlayContent = switchAutoPlay.isChecked
             )
         }
+
+        saveMapProvider()
+    }
+
+    /**
+     * Apply a map provider change: persist it, update the in-memory holder,
+     * and recreate the activity so the map for the new provider attaches.
+     * The whole map stack — rendering, place discovery, search, routing —
+     * follows the toggle.
+     */
+    private fun saveMapProvider() {
+        val selected = if (rbProviderGoogle.isChecked) MapProvider.GOOGLE else MapProvider.OPEN_STREET_MAP
+        if (selected == mapProviderHolder.current) return
+
+        mapProviderHolder.set(selected)
+        viewModel.setMapProvider(selected) // ViewModel scope survives the recreate
+        activity?.recreate()
     }
     
     /**

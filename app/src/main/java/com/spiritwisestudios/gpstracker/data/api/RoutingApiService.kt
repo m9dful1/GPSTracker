@@ -1,5 +1,6 @@
 package com.spiritwisestudios.gpstracker.data.api
 
+import com.spiritwisestudios.gpstracker.data.api.RoutingApi.Route
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
 import com.spiritwisestudios.gpstracker.util.Polyline
@@ -23,14 +24,7 @@ import java.io.IOException
 class RoutingApiService(
     private val httpClient: OkHttpClient,
     private val baseUrl: String = DEFAULT_BASE_URL
-) {
-
-    data class Route(
-        val points: List<LatLng>,
-        val distanceMeters: Float,
-        val durationMillis: Long,
-        val instructions: List<NavigationService.NavigationInstruction>
-    )
+) : RoutingApi {
 
     companion object {
         private const val DEFAULT_BASE_URL = "https://valhalla1.openstreetmap.de"
@@ -151,10 +145,10 @@ class RoutingApiService(
      * Compute a route, or null when the server is unreachable or returns
      * nothing usable. Waypoints are routed through in the given order.
      */
-    suspend fun getRoute(
+    override suspend fun getRoute(
         origin: LatLng,
         destination: LatLng,
-        waypoints: List<LatLng> = emptyList()
+        waypoints: List<LatLng>
     ): Route? = withContext(Dispatchers.IO) {
         val requestJson = buildRequestJson(origin, destination, waypoints)
 

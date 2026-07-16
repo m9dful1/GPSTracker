@@ -13,7 +13,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.spiritwisestudios.gpstracker.R
-import com.spiritwisestudios.gpstracker.data.api.GeocodingApiService
+import com.spiritwisestudios.gpstracker.data.api.GeocodingApi
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -21,9 +21,10 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Destination search sheet backed by the Photon geocoder (OpenStreetMap).
- * Replaces the Google Places Autocomplete widget: type a place or address,
- * results update as you type, tapping one starts navigation.
+ * Destination search sheet: type a place or address, results update as you
+ * type, tapping one starts navigation. Backed by the Photon geocoder
+ * (OpenStreetMap) or Google Places Text Search, per the map-provider
+ * setting.
  */
 @AndroidEntryPoint
 class DestinationSearchBottomSheet : BottomSheetDialogFragment() {
@@ -36,7 +37,7 @@ class DestinationSearchBottomSheet : BottomSheetDialogFragment() {
     }
 
     @Inject
-    lateinit var geocodingApiService: GeocodingApiService
+    lateinit var geocodingApi: GeocodingApi
 
     private var searchJob: Job? = null
 
@@ -75,7 +76,7 @@ class DestinationSearchBottomSheet : BottomSheetDialogFragment() {
 
             searchJob = viewLifecycleOwner.lifecycleScope.launch {
                 delay(SEARCH_DEBOUNCE_MS) // wait for the user to stop typing
-                val results = geocodingApiService.search(query, host.searchLocationBias())
+                val results = geocodingApi.search(query, host.searchLocationBias())
 
                 statusText.visibility = if (results.isEmpty()) View.VISIBLE else View.GONE
                 statusText.text = getString(R.string.search_no_results, query)
@@ -92,12 +93,12 @@ class DestinationSearchBottomSheet : BottomSheetDialogFragment() {
     }
 
     private class SearchResultAdapter(
-        private val onClick: (GeocodingApiService.SearchResult) -> Unit
+        private val onClick: (GeocodingApi.SearchResult) -> Unit
     ) : RecyclerView.Adapter<SearchResultAdapter.Holder>() {
 
-        private val results = mutableListOf<GeocodingApiService.SearchResult>()
+        private val results = mutableListOf<GeocodingApi.SearchResult>()
 
-        fun submit(newResults: List<GeocodingApiService.SearchResult>) {
+        fun submit(newResults: List<GeocodingApi.SearchResult>) {
             results.clear()
             results.addAll(newResults)
             notifyDataSetChanged()

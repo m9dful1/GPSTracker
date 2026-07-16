@@ -7,7 +7,7 @@ import android.location.Location
 import android.os.Build
 import androidx.core.location.LocationListenerCompat
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
-import com.spiritwisestudios.gpstracker.data.api.RoutingApiService
+import com.spiritwisestudios.gpstracker.data.api.RoutingApi
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CoroutineScope
@@ -29,7 +29,7 @@ import android.graphics.Color
 
 class NavigationServiceImpl @Inject constructor(
     private val context: Context,
-    private val routingApiService: RoutingApiService
+    private val routingApi: RoutingApi
 ) : NavigationService {
 
     private val locationClient = FrameworkLocationClient(context)
@@ -431,8 +431,8 @@ class NavigationServiceImpl @Inject constructor(
     }
     
     /**
-     * Get route information from the routing service (Valhalla over
-     * OpenStreetMap data — no Google API involved).
+     * Get route information from the routing service (Valhalla or the
+     * Google Routes API, per the map-provider setting).
      */
     private suspend fun getRoute(
         origin: LatLng,
@@ -450,7 +450,7 @@ class NavigationServiceImpl @Inject constructor(
                     "destination=${destination.latitude},${destination.longitude} waypoints=${waypoints.size}"
         )
 
-        val route = routingApiService.getRoute(origin, destination, waypoints) ?: return null
+        val route = routingApi.getRoute(origin, destination, waypoints) ?: return null
 
         Timber.d("Route with ${route.points.size} points, distance: ${route.distanceMeters}m, duration: ${route.durationMillis}ms, ${route.instructions.size} instructions")
 

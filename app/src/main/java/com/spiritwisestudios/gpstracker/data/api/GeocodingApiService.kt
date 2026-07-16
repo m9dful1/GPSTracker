@@ -1,5 +1,6 @@
 package com.spiritwisestudios.gpstracker.data.api
 
+import com.spiritwisestudios.gpstracker.data.api.GeocodingApi.SearchResult
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.util.GeoUtils
 import kotlinx.coroutines.Dispatchers
@@ -20,14 +21,7 @@ import java.util.Locale
 class GeocodingApiService(
     private val httpClient: OkHttpClient,
     private val baseUrl: String = DEFAULT_BASE_URL
-) {
-
-    data class SearchResult(
-        val name: String,
-        /** Secondary line: street, city, state, country — whatever Photon knows. */
-        val detail: String,
-        val latLng: LatLng
-    )
+) : GeocodingApi {
 
     companion object {
         private const val DEFAULT_BASE_URL = "https://photon.komoot.io"
@@ -43,10 +37,9 @@ class GeocodingApiService(
         /**
          * Fetch well past what we show: Photon returns one feature per OSM
          * element, so a bridge split into several ways arrives several times
-         * and deduplication needs slack to still fill [MAX_RESULTS].
+         * and deduplication needs slack to still fill the requested limit.
          */
         private const val FETCH_LIMIT = 30
-        private const val MAX_RESULTS = 10
 
         // Wide enough that fragments of a long landmark (the Golden Gate
         // Bridge's OSM ways sit ~1.6 km apart) still collapse into one result.
@@ -141,10 +134,10 @@ class GeocodingApiService(
      * Search places and addresses matching a free-text query, biased toward
      * a location when one is known.
      */
-    suspend fun search(
+    override suspend fun search(
         query: String,
-        bias: LatLng? = null,
-        limit: Int = MAX_RESULTS
+        bias: LatLng?,
+        limit: Int
     ): List<SearchResult> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
 

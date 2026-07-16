@@ -3,13 +3,23 @@ package com.spiritwisestudios.gpstracker.di
 import android.content.Context
 import com.spiritwisestudios.gpstracker.BuildConfig
 import com.spiritwisestudios.gpstracker.data.api.GeminiApiService
+import com.spiritwisestudios.gpstracker.data.api.GeocodingApi
 import com.spiritwisestudios.gpstracker.data.api.GeocodingApiService
+import com.spiritwisestudios.gpstracker.data.api.GoogleGeocodingApiService
+import com.spiritwisestudios.gpstracker.data.api.GooglePlacesApiService
+import com.spiritwisestudios.gpstracker.data.api.GoogleRoutingApiService
+import com.spiritwisestudios.gpstracker.data.api.PlacesApi
 import com.spiritwisestudios.gpstracker.data.api.PlacesApiService
+import com.spiritwisestudios.gpstracker.data.api.RoutingApi
 import com.spiritwisestudios.gpstracker.data.api.RoutingApiService
+import com.spiritwisestudios.gpstracker.data.api.SwitchingGeocodingApi
+import com.spiritwisestudios.gpstracker.data.api.SwitchingPlacesApi
+import com.spiritwisestudios.gpstracker.data.api.SwitchingRoutingApi
 import com.spiritwisestudios.gpstracker.data.api.WikipediaApiService
 import com.spiritwisestudios.gpstracker.data.db.AppDatabase
 import com.spiritwisestudios.gpstracker.data.db.dao.PointOfInterestDao
 import com.spiritwisestudios.gpstracker.data.db.dao.TourContentDao
+import com.spiritwisestudios.gpstracker.data.repository.MapProviderHolder
 import com.spiritwisestudios.gpstracker.data.repository.PlacesRepositoryImpl
 import com.spiritwisestudios.gpstracker.data.repository.TourContentRepository
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
@@ -60,10 +70,30 @@ object AppModule {
         return database.tourContentDao()
     }
 
+    // Both mapping stacks are always constructed (they're just OkHttp
+    // wrappers); the Switching* facades pick per call from the map-provider
+    // setting, so the toggle takes effect without recreating anything.
+
     @Provides
     @Singleton
     fun providePlacesApiService(okHttpClient: OkHttpClient): PlacesApiService {
         return PlacesApiService(okHttpClient)
+    }
+
+    @Provides
+    @Singleton
+    fun provideGooglePlacesApiService(okHttpClient: OkHttpClient): GooglePlacesApiService {
+        return GooglePlacesApiService(okHttpClient, BuildConfig.MAPS_API_KEY)
+    }
+
+    @Provides
+    @Singleton
+    fun providePlacesApi(
+        mapProviderHolder: MapProviderHolder,
+        placesApiService: PlacesApiService,
+        googlePlacesApiService: GooglePlacesApiService
+    ): PlacesApi {
+        return SwitchingPlacesApi(mapProviderHolder, placesApiService, googlePlacesApiService)
     }
 
     @Provides
@@ -88,17 +118,49 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideGoogleRoutingApiService(okHttpClient: OkHttpClient): GoogleRoutingApiService {
+        return GoogleRoutingApiService(okHttpClient, BuildConfig.MAPS_API_KEY)
+    }
+
+    @Provides
+    @Singleton
+    fun provideRoutingApi(
+        mapProviderHolder: MapProviderHolder,
+        routingApiService: RoutingApiService,
+        googleRoutingApiService: GoogleRoutingApiService
+    ): RoutingApi {
+        return SwitchingRoutingApi(mapProviderHolder, routingApiService, googleRoutingApiService)
+    }
+
+    @Provides
+    @Singleton
     fun provideGeocodingApiService(okHttpClient: OkHttpClient): GeocodingApiService {
         return GeocodingApiService(okHttpClient)
     }
 
     @Provides
     @Singleton
+    fun provideGoogleGeocodingApiService(okHttpClient: OkHttpClient): GoogleGeocodingApiService {
+        return GoogleGeocodingApiService(okHttpClient, BuildConfig.MAPS_API_KEY)
+    }
+
+    @Provides
+    @Singleton
+    fun provideGeocodingApi(
+        mapProviderHolder: MapProviderHolder,
+        geocodingApiService: GeocodingApiService,
+        googleGeocodingApiService: GoogleGeocodingApiService
+    ): GeocodingApi {
+        return SwitchingGeocodingApi(mapProviderHolder, geocodingApiService, googleGeocodingApiService)
+    }
+
+    @Provides
+    @Singleton
     fun providePlacesRepository(
-        placesApiService: PlacesApiService,
+        placesApi: PlacesApi,
         pointOfInterestDao: PointOfInterestDao
     ): PlacesRepository {
-        return PlacesRepositoryImpl(placesApiService, pointOfInterestDao)
+        return PlacesRepositoryImpl(placesApi, pointOfInterestDao)
     }
 
     @Provides
@@ -150,8 +212,8 @@ object AppModule {
     @Singleton
     fun provideNavigationService(
         @ApplicationContext context: Context,
-        routingApiService: RoutingApiService
+        routingApi: RoutingApi
     ): NavigationService {
-        return NavigationServiceImpl(context, routingApiService)
+        return NavigationServiceImpl(context, routingApi)
     }
 }

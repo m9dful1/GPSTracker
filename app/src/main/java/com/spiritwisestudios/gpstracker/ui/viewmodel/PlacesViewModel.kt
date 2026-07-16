@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.asLiveData
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
+import com.spiritwisestudios.gpstracker.domain.model.MapProvider
 import com.spiritwisestudios.gpstracker.domain.repository.PlacesRepository
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.TourContent
@@ -264,6 +265,17 @@ class PlacesViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferencesRepository.updateUserPreferences(userPreferences)
             audioService.updateVoiceSettings(userPreferences)
+        }
+    }
+
+    /**
+     * Persist the map provider choice. Runs in the ViewModel scope so the
+     * write survives the settings sheet dismissing and the activity
+     * recreating right after.
+     */
+    fun setMapProvider(provider: MapProvider) {
+        viewModelScope.launch {
+            userPreferencesRepository.setMapProvider(provider)
         }
     }
     

@@ -1,7 +1,7 @@
 package com.spiritwisestudios.gpstracker.data.repository
 
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
-import com.spiritwisestudios.gpstracker.data.api.PlacesApiService
+import com.spiritwisestudios.gpstracker.data.api.PlacesApi
 import com.spiritwisestudios.gpstracker.data.db.dao.PointOfInterestDao
 import com.spiritwisestudios.gpstracker.data.db.entity.PointOfInterestEntity
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
@@ -19,7 +19,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class PlacesRepositoryImpl @Inject constructor(
-    private val placesApiService: PlacesApiService,
+    private val placesApi: PlacesApi,
     private val pointOfInterestDao: PointOfInterestDao
 ) : PlacesRepository {
 
@@ -56,7 +56,7 @@ class PlacesRepositoryImpl @Inject constructor(
      */
     override fun getNearbyPlaces(center: LatLng, radius: Int): Flow<List<PointOfInterest>> = flow {
         try {
-            val places = placesApiService.getNearbyPlaces(center, radius)
+            val places = placesApi.getNearbyPlaces(center, radius)
             Timber.d("Successfully fetched ${places.size} nearby places")
             emit(mergeVisitedState(places, visitedDatesById()))
         } catch (e: Exception) {
@@ -91,7 +91,7 @@ class PlacesRepositoryImpl @Inject constructor(
 
         for (sample in samples) {
             try {
-                for (poi in placesApiService.getNearbyPlaces(sample, searchRadius)) {
+                for (poi in placesApi.getNearbyPlaces(sample, searchRadius)) {
                     val key = poi.placeId ?: poi.id
                     if (seenPlaceIds.add(key)) {
                         pois.add(poi)
@@ -125,7 +125,7 @@ class PlacesRepositoryImpl @Inject constructor(
 
         // If not in database, try to get from API
         return try {
-            Result.success(placesApiService.getPlaceDetails(placeId))
+            Result.success(placesApi.getPlaceDetails(placeId))
         } catch (e: Exception) {
             Timber.e(e, "Error fetching place details")
             Result.failure(e)

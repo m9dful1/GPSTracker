@@ -154,5 +154,5 @@ class GeocodingApiServiceTest {
     }
 
     private fun result(name: String, lat: Double, lon: Double) =
-        GeocodingApiService.SearchResult(name, "", LatLng(lat, lon))
+        GeocodingApi.SearchResult(name, "", LatLng(lat, lon))
 }

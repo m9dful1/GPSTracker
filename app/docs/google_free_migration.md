@@ -5,10 +5,14 @@ location awareness — without any Google API key, billing account, or (after
 Phase 4) Google Play Services at all. All replacement services are built on
 OpenStreetMap data and are free to use without registration.
 
-**Status: all four phases are implemented.** The app has no Google
-dependencies left: no API key, no `com.google.android.gms` or
-`com.google.android.libraries` artifacts, no key plumbing in Gradle or the
-manifest. `local.properties` no longer needs `MAPS_API_KEY`.
+**Status: all four phases are implemented.** The OpenStreetMap stack is the
+default and needs no API key.
+
+**Update (July 2026):** the Google stack later returned as an *optional*
+provider behind a settings toggle — see `app/docs/map_providers.md`. The
+OpenStreetMap services described here remain the default and the keyless
+fallback; with no `MAPS_API_KEY` in `local.properties` the app still builds
+and runs fully Google-free (the Maps SDK dependency is present but unused).
 
 Implementation notes that differ from or refine the plan below:
 

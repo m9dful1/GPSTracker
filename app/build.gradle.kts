@@ -7,17 +7,20 @@ plugins {
     id("com.google.dagger.hilt.android")
 }
 
-// Optional: a free Google AI Studio key (https://aistudio.google.com/apikey)
-// in local.properties as GEMINI_API_KEY=... switches tour narration to
-// AI-written scripts — see app/docs/ai_narration.md. Without it the app
-// narrates straight from Wikipedia. Never commit the key.
-val geminiApiKey: String = Properties().let { props ->
-    val localProperties = rootProject.file("local.properties")
-    if (localProperties.exists()) {
-        localProperties.inputStream().use { props.load(it) }
+// Optional API keys from local.properties (gitignored — never commit keys).
+// MAPS_API_KEY unlocks the Google Maps provider in settings (see
+// app/docs/map_providers.md). GEMINI_API_KEY (a free AI Studio key,
+// https://aistudio.google.com/apikey) switches tour narration to AI-written
+// scripts (app/docs/ai_narration.md). Without either key the app runs fully
+// keyless on OpenStreetMap services and Wikipedia narration.
+val localProperties: Properties = Properties().apply {
+    val propertiesFile = rootProject.file("local.properties")
+    if (propertiesFile.exists()) {
+        propertiesFile.inputStream().use { load(it) }
     }
-    props.getProperty("GEMINI_API_KEY") ?: ""
 }
+val mapsApiKey: String = localProperties.getProperty("MAPS_API_KEY") ?: ""
+val geminiApiKey: String = localProperties.getProperty("GEMINI_API_KEY") ?: ""
 
 android {
     namespace = "com.spiritwisestudios.gpstracker"
@@ -32,6 +35,8 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
+        buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
     }
 
@@ -73,6 +78,9 @@ dependencies {
     
     // MapLibre map rendering (OpenStreetMap vector tiles, no API key)
     implementation(libs.maplibre)
+
+    // Google Maps rendering, for the optional Google map provider
+    implementation(libs.play.services.maps)
 
     // Destination search results list
     implementation("androidx.recyclerview:recyclerview:1.3.2")

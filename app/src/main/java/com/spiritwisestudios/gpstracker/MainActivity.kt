@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.Configuration
-import android.content.res.Resources
 import android.net.Uri
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
@@ -30,27 +29,13 @@ import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.Observer
 import androidx.lifecycle.lifecycleScope
 import androidx.core.location.LocationListenerCompat
+import com.spiritwisestudios.gpstracker.data.repository.MapProviderHolder
 import com.spiritwisestudios.gpstracker.data.service.FrameworkLocationClient
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
-import org.maplibre.android.annotations.Marker
-import org.maplibre.android.annotations.MarkerOptions
-import org.maplibre.android.annotations.Polygon
-import org.maplibre.android.annotations.PolygonOptions
-import org.maplibre.android.annotations.PolylineOptions
-import org.maplibre.android.camera.CameraPosition
-import org.maplibre.android.camera.CameraUpdateFactory
-import org.maplibre.android.geometry.LatLng as MapLatLng
-import org.maplibre.android.geometry.LatLngBounds
-import org.maplibre.android.location.LocationComponentActivationOptions
-import org.maplibre.android.location.modes.CameraMode
-import org.maplibre.android.maps.MapLibreMap
-import org.maplibre.android.maps.MapView
-import org.maplibre.android.maps.OnMapReadyCallback
-import org.maplibre.android.maps.Style
+import com.spiritwisestudios.gpstracker.domain.model.MapProvider
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
-import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
 import com.spiritwisestudios.gpstracker.service.TourModeService
 import com.spiritwisestudios.gpstracker.ui.fragment.DestinationSearchBottomSheet
@@ -59,6 +44,9 @@ import com.spiritwisestudios.gpstracker.ui.fragment.PlaceDetailsBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.TourJournalBottomSheet
 import com.spiritwisestudios.gpstracker.ui.fragment.TourSettingsFragment
 import com.spiritwisestudios.gpstracker.ui.fragment.TurnInstructionFragment
+import com.spiritwisestudios.gpstracker.ui.map.GoogleMapController
+import com.spiritwisestudios.gpstracker.ui.map.MapController
+import com.spiritwisestudios.gpstracker.ui.map.MapLibreMapController
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
 import com.spiritwisestudios.gpstracker.util.AppConstants
 import com.spiritwisestudios.gpstracker.util.CameraLogic
@@ -75,42 +63,40 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
-import android.os.Looper
 import com.spiritwisestudios.gpstracker.util.GeoUtils
-import com.spiritwisestudios.gpstracker.util.MapStyles
-import com.spiritwisestudios.gpstracker.util.MarkerIcons
 import com.spiritwisestudios.gpstracker.util.MarkerStyling
 import com.spiritwisestudios.gpstracker.databinding.ActivityMainBinding
 import java.util.ArrayDeque
 
-// Removed debug-time API key logger to avoid accidental key exposure
-
 @AndroidEntryPoint
-class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMarkerClickListener,
+class MainActivity : AppCompatActivity(), MapController.Host,
     TurnInstructionFragment.NavigationDetailsProvider, TurnInstructionFragment.NavigationInstructionController,
     MapLayersBottomSheet.MapLayersHost, DestinationSearchBottomSheet.DestinationSearchHost {
 
-    private lateinit var mapView: MapView
-    private lateinit var mMap: MapLibreMap
+    // The map, behind the controller for whichever provider is active —
+    // MainActivity never touches a map SDK directly
+    private lateinit var map: MapController
+    private lateinit var activeProvider: MapProvider
     private lateinit var locationClient: FrameworkLocationClient
     private lateinit var locationListener: LocationListenerCompat
 
     @Inject
     lateinit var userPreferencesRepository: UserPreferencesRepository
 
+    @Inject
+    lateinit var mapProviderHolder: MapProviderHolder
+
     // Use the viewModels() delegate to get the ViewModel from Hilt
     private val placesViewModel: PlacesViewModel by viewModels()
 
-    private val poiMarkers = mutableMapOf<String, Marker>()
-
-    // MapLibre markers have no tag slot; keyed by Marker.id instead
-    private val markerPlaceIds = mutableMapOf<Long, String>()
     private val LOCATION_PERMISSION_REQUEST = 1
     private val TOUR_LOCATION_PERMISSION_REQUEST = 2
     private val NOTIFICATION_PERMISSION_REQUEST = 3
 
-    // The layers-sheet style currently applied to the map
-    private var currentMapStyle = MapStyles.DEFAULT
+    // The layers-sheet choices currently applied to the map. The style int
+    // is a MapStyles or GoogleMapStyles value, per the active provider.
+    private var currentMapStyle = 0
+    private var trafficEnabled = false
 
     // The in-flight navigation work (geocoding, then status collection),
     // tracked so canceling actually stops it
@@ -144,16 +130,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     // Where we last searched for POIs; refetch after moving far enough
     private var lastPoiFetchCenter: LatLng? = null
 
-    // Outline of the area scouted via map long-press, if any
-    private var scoutCircle: Polygon? = null
-
     // Dedup key so the same instruction isn't spoken on every location tick
     private var lastAnnouncementKey: String? = null
-    
+
     // Tour mode service connection
     private var tourModeService: TourModeService? = null
     private var isTourModeActive = false
-    
+
     // Tour mode UI elements
     private lateinit var fabTourMode: FloatingActionButton
     private lateinit var tourModeStatusCard: CardView
@@ -161,20 +144,16 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     private lateinit var tourModeDescription: TextView
     private lateinit var btnStopTour: Button
     private lateinit var btnTourSettings: Button
-    
+
     // UI elements for navigation
     private lateinit var searchBarCard: CardView
     private lateinit var navigationStatusCard: CardView
     private lateinit var tvNavigationDestination: TextView
     private lateinit var tvNavigationInfo: TextView
-    
+
     // Navigation service
     @Inject
     lateinit var navigationService: NavigationService
-    
-    // Route polyline
-    private var routePolyline: org.maplibre.android.annotations.Polyline? = null
-    private var destinationMarker: Marker? = null
 
     /**
      * Navigation is a three-state machine. PREVIEW computes and shows the
@@ -183,17 +162,17 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
      */
     private enum class NavState { NONE, PREVIEW, GUIDING }
     private var navState = NavState.NONE
-    
+
     // Service connection for binding to the TourModeService
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             val binder = service as TourModeService.TourModeServiceBinder
             tourModeService = binder.getService()
-            
+
             // Start observing service state changes
             observeTourModeServiceState()
         }
-        
+
         override fun onServiceDisconnected(name: ComponentName?) {
             tourModeService = null
             isTourModeActive = false
@@ -205,24 +184,15 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         private const val POI_REFETCH_DISTANCE_METERS = 300f
         private const val SCOUT_RADIUS_METERS = 750
 
-        // MapLibre renders 512px tiles, so its zoom levels sit one below
-        // Google's for the same view; these replace the old hardcoded 18f
-        // and offset CameraLogic's Google-tuned zoom curve.
-        private const val FOLLOW_ZOOM = 17.0
-        private const val ZOOM_OFFSET = 1f
-
         // A cached fix older than this is more likely misleading than helpful
         private const val MAX_SEED_AGE_MS = 10 * 60 * 1000L
     }
-
-    /** Domain coordinates → MapLibre coordinates at the map boundary. */
-    private fun LatLng.toMap() = MapLatLng(latitude, longitude)
 
     private lateinit var binding: ActivityMainBinding
 
     // Turn instruction fragment
     private var turnInstructionFragment: TurnInstructionFragment? = null
-    
+
     // LocationHistory for calculating bearing
     private val locationHistory = ArrayDeque<LatLng>(5)
 
@@ -235,19 +205,22 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         // Initialize UI elements
         initializeUIElements()
 
+        // The map provider is a settings choice; captured once here so a
+        // mid-session toggle applies via activity recreation, never as a
+        // half-switched map
+        activeProvider = mapProviderHolder.current
+        map = when (activeProvider) {
+            MapProvider.GOOGLE -> GoogleMapController(this)
+            MapProvider.OPEN_STREET_MAP -> MapLibreMapController(this)
+        }
+        map.onCreate(binding.mapContainer, savedInstanceState, this)
+
         // Keep controls clear of the system bars: targetSdk 35 draws
         // edge-to-edge, so the 3-button nav bar otherwise covers the
         // bottom FABs and cards (gesture nav has a much smaller inset)
         applyWindowInsets()
 
-        // Initialize the map view and request the map to be ready. The
-        // MapView needs the activity lifecycle forwarded to it (see the
-        // lifecycle overrides below).
-        mapView = binding.map
-        mapView.onCreate(savedInstanceState)
-        mapView.getMapAsync(this)
-
-        // Setup the framework location client (no Play Services)
+        // Setup the framework location client (works with either provider)
         locationClient = FrameworkLocationClient(this)
 
         // Define the listener to handle location updates
@@ -262,14 +235,14 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             updateLocationOnMap(location)
             refreshNearbyPlacesIfNeeded()
         }
-        
+
         // Set up observers
         setupObservers()
-        
+
         // Set up click listeners
         setupClickListeners()
     }
-    
+
     private fun initializeUIElements() {
         // Initialize the tour mode UI elements
         fabTourMode = findViewById(R.id.fab_tour_mode)
@@ -278,22 +251,23 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         tourModeDescription = findViewById(R.id.tour_mode_description)
         btnStopTour = findViewById(R.id.btn_stop_tour)
         btnTourSettings = findViewById(R.id.btn_tour_settings)
-        
+
         // Initialize navigation UI elements
         searchBarCard = findViewById(R.id.search_bar_card)
         navigationStatusCard = findViewById(R.id.navigation_status_card)
         tvNavigationDestination = navigationStatusCard.findViewById(R.id.tv_navigation_destination)
         tvNavigationInfo = navigationStatusCard.findViewById(R.id.tv_navigation_info)
-        
+
         // Initialize the turn instruction container
         findViewById<View>(R.id.turn_instruction_container)
     }
-    
+
     /**
      * Add the system-bar insets to the edge-anchored controls. The map
-     * itself stays edge-to-edge; only the controls move. The layout's
-     * margins are treated as design margins with the inset added on top,
-     * so gesture nav gets a small lift and the 3-button bar a full one.
+     * itself stays edge-to-edge; only the controls (and the map's own
+     * chrome, via the controller) move. The layout's margins are treated as
+     * design margins with the inset added on top, so gesture nav gets a
+     * small lift and the 3-button bar a full one.
      */
     private fun applyWindowInsets() {
         val bottomViews = listOf<View>(
@@ -322,6 +296,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
                     topMargin = baseTopMargins.getValue(view) + bars.top
                 }
             }
+            map.applySystemBarInsets(bars.top, bars.bottom)
             windowInsets
         }
     }
@@ -335,12 +310,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
                 startTourMode()
             }
         }
-        
+
         // Set up click listener for the stop tour button
         btnStopTour.setOnClickListener {
             stopTourMode()
         }
-        
+
         // Set up click listener for the tour settings button
         btnTourSettings.setOnClickListener {
             showTourSettings()
@@ -359,11 +334,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             })
         }
 
-        // The search bar opens Places Autocomplete, like Google Maps
+        // The search bar opens the destination search sheet, like Google Maps
         searchBarCard.setOnClickListener {
             launchDestinationSearch()
         }
-        
+
         // Navigation card buttons keep one role each; the card's state
         // machine decides which are visible
         binding.btnNavStart.setOnClickListener { beginGuidance() }
@@ -382,7 +357,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             }
         }
 
-        // Layers FAB: pick the map type and toggle traffic independently
+        // Layers FAB: pick the map style (and traffic, on the Google map)
         findViewById<FloatingActionButton>(R.id.fab_layers).setOnClickListener {
             MapLayersBottomSheet.newInstance()
                 .show(supportFragmentManager, MapLayersBottomSheet.TAG)
@@ -395,13 +370,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         }
 
     }
-    
+
     private fun setupObservers() {
         // Observe nearby places
         placesViewModel.nearbyPlaces.observe(this, Observer { places ->
             displayPointsOfInterest(places)
         })
-        
+
         // Observe errors
         placesViewModel.error.observe(this, Observer { errorMessage ->
             errorMessage?.let {
@@ -415,7 +390,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             binding.progressNarration.progress = (fraction * 100).toInt().coerceIn(0, 100)
         })
     }
-    
+
     private fun observeTourModeServiceState() {
         // Show a fact card while a POI is being narrated
         lifecycleScope.launch {
@@ -459,7 +434,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             }
         }
     }
-    
+
     /**
      * Slide the fact card up while narration plays and slide it away when
      * the narration (and queue) finishes.
@@ -542,7 +517,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             fabTourMode.setImageResource(R.drawable.ic_tour)
         }
     }
-    
+
     /**
      * Start tour mode once its two runtime permissions are settled. The
      * tour service is a foreground service with the `location` type, so
@@ -604,23 +579,23 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         isTourModeActive = true
         updateTourModeUI(true)
     }
-    
+
     private fun stopTourMode() {
         Timber.d("stopTourMode called")
         // Create intent to stop the tour mode service
         val intent = Intent(this, TourModeService::class.java).apply {
             action = AppConstants.ACTION_STOP_TOUR_MODE
         }
-        
+
         // Stop the service
         startService(intent)
-        
+
         // Unbind from the service
         if (tourModeService != null) {
             unbindService(serviceConnection)
             tourModeService = null
         }
-        
+
         isTourModeActive = false
         updateTourModeUI(false)
     }
@@ -629,86 +604,74 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     // The layers sheet reads and mutates the map through these; guarded in
     // case the sheet is somehow opened before the map is ready.
 
+    override fun mapProvider(): MapProvider = activeProvider
+
     override fun currentMapStyle(): Int = currentMapStyle
 
     override fun onMapStyleSelected(style: Int) {
         currentMapStyle = style
-        if (::mMap.isInitialized) applyMapStyle(style)
-        lifecycleScope.launch { userPreferencesRepository.setMapStyle(style) }
+        if (map.isReady) applyMapStyle(style)
+        lifecycleScope.launch {
+            when (activeProvider) {
+                MapProvider.GOOGLE -> userPreferencesRepository.setGoogleMapStyle(style)
+                MapProvider.OPEN_STREET_MAP -> userPreferencesRepository.setMapStyle(style)
+            }
+        }
     }
 
-    // When the map is ready, load the style and enable location display
-    override fun onMapReady(map: MapLibreMap) {
+    override fun isTrafficEnabled(): Boolean = trafficEnabled
+
+    override fun onTrafficToggled(enabled: Boolean) {
+        trafficEnabled = enabled
+        map.setTrafficEnabled(enabled)
+        lifecycleScope.launch { userPreferencesRepository.setMapTraffic(enabled) }
+    }
+
+    // --- MapController.Host ---
+
+    override fun onMapReady() {
         Timber.d("onMapReady called")
-        mMap = map
-        mMap.setOnMarkerClickListener(this)
-
-        mMap.uiSettings.isCompassEnabled = true
-        mMap.uiSettings.isRotateGesturesEnabled = true
-        mMap.uiSettings.isTiltGesturesEnabled = true
-
-        // Move the map's own chrome (compass, logo, attribution) clear of
-        // the system bars
-        ViewCompat.getRootWindowInsets(binding.root)
-            ?.getInsets(WindowInsetsCompat.Type.systemBars())
-            ?.let { bars ->
-                mMap.uiSettings.setCompassMargins(
-                    mMap.uiSettings.compassMarginLeft,
-                    mMap.uiSettings.compassMarginTop + bars.top,
-                    mMap.uiSettings.compassMarginRight,
-                    mMap.uiSettings.compassMarginBottom
-                )
-                mMap.uiSettings.setLogoMargins(
-                    mMap.uiSettings.logoMarginLeft,
-                    mMap.uiSettings.logoMarginTop,
-                    mMap.uiSettings.logoMarginRight,
-                    mMap.uiSettings.logoMarginBottom + bars.bottom
-                )
-                mMap.uiSettings.setAttributionMargins(
-                    mMap.uiSettings.attributionMarginLeft,
-                    mMap.uiSettings.attributionMarginTop,
-                    mMap.uiSettings.attributionMarginRight,
-                    mMap.uiSettings.attributionMarginBottom + bars.bottom
-                )
-            }
-
-        // Stop following the user when they pan/zoom manually (Google Maps
-        // behavior); the recenter FAB turns following back on.
-        mMap.addOnCameraMoveStartedListener { reason ->
-            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
-                isFollowingUser = false
-            }
-        }
-
-        // Long-press anywhere to scout that area for interesting places —
-        // preview a destination before driving there
-        mMap.addOnMapLongClickListener { point ->
-            scoutArea(LatLng(point.latitude, point.longitude))
-            true
-        }
-
-        // Restore the layers-sheet style from the last session; location
-        // display is enabled once the style has loaded
+        // Restore the layers-sheet choices from the last session; location
+        // display is enabled once the style is in place
         lifecycleScope.launch {
-            currentMapStyle = userPreferencesRepository.mapStyleFlow.first()
+            currentMapStyle = when (activeProvider) {
+                MapProvider.GOOGLE -> userPreferencesRepository.googleMapStyleFlow.first()
+                MapProvider.OPEN_STREET_MAP -> userPreferencesRepository.mapStyleFlow.first()
+            }
             applyMapStyle(currentMapStyle)
+            if (activeProvider == MapProvider.GOOGLE) {
+                trafficEnabled = userPreferencesRepository.mapTrafficFlow.first()
+                map.setTrafficEnabled(trafficEnabled)
+            }
+            enableMyLocation()
         }
+    }
+
+    // Stop following the user when they pan/zoom manually (Google Maps
+    // behavior); the recenter FAB turns following back on.
+    override fun onUserGesture() {
+        isFollowingUser = false
+    }
+
+    // Long-press anywhere to scout that area for interesting places —
+    // preview a destination before driving there
+    override fun onMapLongClick(point: LatLng) {
+        scoutArea(point)
+    }
+
+    // Handle marker clicks to show point of interest details
+    override fun onMarkerClick(placeId: String) {
+        placesViewModel.selectPlace(placeId)
+        showPlaceDetailsBottomSheet()
     }
 
     /**
-     * Load a map style (the map renders nothing until one is set). The
-     * default style follows the system DayNight setting so night drives
-     * aren't a full-screen white blast. Markers survive style swaps, but
-     * the location component binds to a style, so it re-activates in the
-     * loaded callback.
+     * Apply a layers-sheet style. The default style follows the system
+     * DayNight setting so night drives aren't a full-screen white blast.
      */
     private fun applyMapStyle(style: Int) {
         val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        val styleUrl = MapStyles.styleUrl(style, nightMode == Configuration.UI_MODE_NIGHT_YES)
-
-        mMap.setStyle(Style.Builder().fromUri(styleUrl)) { loadedStyle ->
-            enableMyLocation(loadedStyle)
-        }
+        map.applyStyle(style, nightMode == Configuration.UI_MODE_NIGHT_YES)
     }
 
     /**
@@ -718,22 +681,14 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
      * enough, the regular around-me refresh replaces them.
      */
     private fun scoutArea(point: LatLng) {
-        scoutCircle?.let { mMap.removePolygon(it) }
-        // MapLibre's simple annotations have no circle; a 64-gon reads the same
-        scoutCircle = mMap.addPolygon(
-            PolygonOptions()
-                .addAll(GeoUtils.circlePoints(point, SCOUT_RADIUS_METERS.toDouble()).map { it.toMap() })
-                .strokeColor(0x8834A853.toInt())
-                .fillColor(0x1434A853)
-        )
-
+        map.showScoutCircle(point, SCOUT_RADIUS_METERS.toDouble())
         placesViewModel.fetchNearbyPlaces(center = point, radius = SCOUT_RADIUS_METERS)
         Toast.makeText(this, R.string.scouting_area, Toast.LENGTH_SHORT).show()
     }
 
     // Request location permission; when granted, show the blue position dot
-    // (MapLibre's location component) and start location updates
-    private fun enableMyLocation(style: Style? = if (::mMap.isInitialized) mMap.style else null) {
+    // and start location updates
+    private fun enableMyLocation() {
         Timber.d("enableMyLocation called")
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED &&
@@ -748,25 +703,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             return
         }
 
-        // The location component renders the blue dot; the camera stays
-        // ours (CameraMode.NONE) — following is handled explicitly
-        if (style != null && style.isFullyLoaded) {
-            try {
-                mMap.locationComponent.apply {
-                    activateLocationComponent(
-                        LocationComponentActivationOptions.builder(this@MainActivity, style).build()
-                    )
-                    isLocationComponentEnabled = true
-                    cameraMode = CameraMode.NONE
-                }
-            } catch (e: SecurityException) {
-                Timber.e(e, "Location permission lost while enabling the location component")
-            }
-        }
-
+        map.enableLocationDisplay()
         startLocationUpdates()
     }
-    
+
     // Set up a location request for frequent updates
     private fun startLocationUpdates() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
@@ -792,23 +732,18 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         }
     }
 
-    // Update the map with the new location data. The map's location
-    // component renders the blue position dot; we only manage the camera.
+    // Update the map with the new location data. The map renders the blue
+    // position dot; we only manage the camera.
     private fun updateLocationOnMap(location: Location) {
         val newLatLng = LatLng(location.latitude, location.longitude)
         lastKnownLatLng = newLatLng
-        if (!::mMap.isInitialized) return
+        if (!map.isReady) return
 
-        // The location component draws the dot from location updates we
-        // forward; MapLibre's own engine is off (CameraMode.NONE + explicit
-        // updates keeps one source of truth)
-        if (mMap.locationComponent.isLocationComponentActivated) {
-            mMap.locationComponent.forceLocationUpdate(location)
-        }
+        map.forwardLocation(location)
 
         if (isFirstUpdate) {
             Timber.d("First location update, animating camera with zoom")
-            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(newLatLng.toMap(), FOLLOW_ZOOM))
+            map.animateToFirstFix(newLatLng)
             isFirstUpdate = false
         } else if (isFollowingUser && navState == NavState.NONE) {
             // Navigation drives its own camera, and a route preview holds
@@ -818,9 +753,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             when {
                 drivingCameraGate.isDriving -> animateDrivingCamera(newLatLng)
                 cameraInDrivingView -> easeToTopDownFollow(newLatLng)
-                else -> mMap.easeCamera(
-                    CameraUpdateFactory.newLatLng(newLatLng.toMap()), 1000, false
-                )
+                else -> map.easeFollow(newLatLng, CameraLogic.CAMERA_EASE_MS)
             }
         }
     }
@@ -834,8 +767,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         if (lastFetch == null || GeoUtils.distanceMeters(lastFetch, current) > POI_REFETCH_DISTANCE_METERS) {
             lastPoiFetchCenter = current
             // Moving on replaces any scouted area with local results
-            scoutCircle?.let { mMap.removePolygon(it) }
-            scoutCircle = null
+            map.clearScoutCircle()
             placesViewModel.fetchNearbyPlaces(center = current, radius = 500)
         }
     }
@@ -878,79 +810,52 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
 
     // Display points of interest on the map
     private fun displayPointsOfInterest(places: List<PointOfInterest>) {
-        if (!::mMap.isInitialized) return
+        if (!map.isReady) return
 
-        // Clear existing POI markers
-        poiMarkers.values.forEach { mMap.removeMarker(it) }
-        poiMarkers.clear()
-        markerPlaceIds.clear()
-
-        // Add new markers for each point of interest
-        places.forEach { poi ->
+        val markers = places.mapNotNull { poi ->
             // Only add a marker if the POI has a place id to look details up by
-            poi.placeId?.let { validPlaceId ->
-                val marker = mMap.addMarker(
-                    MarkerOptions()
-                        .position(poi.latLng.toMap())
-                        .title(poi.name)
-                        .snippet(if (poi.isVisited) "${poi.category} · already narrated" else poi.category)
-                        .icon(
-                            MarkerIcons.pin(
-                                this,
-                                MarkerStyling.hueFor(poi.category),
-                                MarkerStyling.alphaFor(poi.isVisited)
-                            )
-                        )
-                )
-                poiMarkers[poi.id] = marker
-                // Place id for detail lookups on click (markers have no tag slot)
-                markerPlaceIds[marker.id] = validPlaceId
-            } ?: run {
+            val placeId = poi.placeId
+            if (placeId == null) {
                 // Log POIs without a placeId - might indicate an issue upstream
                 Timber.w("Point of Interest '${poi.name}' (ID: ${poi.id}) has no placeId, skipping detail marker setup.")
+                return@mapNotNull null
             }
+            MapController.PoiMarkerSpec(
+                placeId = placeId,
+                position = poi.latLng,
+                title = poi.name,
+                snippet = if (poi.isVisited) "${poi.category} · already narrated" else poi.category,
+                hue = MarkerStyling.hueFor(poi.category),
+                alpha = MarkerStyling.alphaFor(poi.isVisited)
+            )
         }
+        map.setPoiMarkers(markers)
     }
 
-    // Handle marker clicks to show point of interest details
-    override fun onMarkerClick(marker: Marker): Boolean {
-        // Get the place id remembered for this marker
-        val placeId = markerPlaceIds[marker.id] ?: return false
-
-        // Select the place to show details
-        placesViewModel.selectPlace(placeId)
-
-        // Show the bottom sheet with place details
-        showPlaceDetailsBottomSheet()
-
-        return true // Return true to consume the event (don't show the info window)
-    }
-    
     // Show the bottom sheet with place details
     private fun showPlaceDetailsBottomSheet() {
         val bottomSheet = PlaceDetailsBottomSheet.newInstance()
         bottomSheet.show(supportFragmentManager, PlaceDetailsBottomSheet.TAG)
     }
 
-    // The MapView renders with its own GL surface and needs the activity
-    // lifecycle forwarded to it explicitly (the old map fragment did this
-    // for itself).
+    // The map view renders with its own GL surface and needs the activity
+    // lifecycle forwarded to it explicitly (through the controller).
     override fun onStart() {
         super.onStart()
-        mapView.onStart()
+        map.onStart()
     }
 
     // Stop location updates when the activity is paused to save battery
     override fun onPause() {
         super.onPause()
-        mapView.onPause()
+        map.onPause()
         locationClient.removeUpdates(locationListener)
     }
 
     // Resume location updates when the activity is resumed
     override fun onResume() {
         super.onResume()
-        mapView.onResume()
+        map.onResume()
         if (!isFirstUpdate) {
             startLocationUpdates()
         }
@@ -958,17 +863,17 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
 
     override fun onStop() {
         super.onStop()
-        mapView.onStop()
+        map.onStop()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        mapView.onSaveInstanceState(outState)
+        map.onSaveInstanceState(outState)
     }
 
     override fun onLowMemory() {
         super.onLowMemory()
-        mapView.onLowMemory()
+        map.onLowMemory()
     }
 
     // Clean up resources when the activity is destroyed
@@ -983,7 +888,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             unbindService(serviceConnection)
             tourModeService = null
         }
-        mapView.onDestroy()
+        map.onDestroy()
         super.onDestroy()
     }
 
@@ -1002,12 +907,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     private fun showNavigationStatus() {
         navigationStatusCard.visibility = View.VISIBLE
     }
-    
+
     // Hide the navigation status card
     private fun hideNavigationStatus() {
         navigationStatusCard.visibility = View.GONE
     }
-    
+
     // DestinationSearchHost: bias search results toward where the user is
     override fun searchLocationBias(): LatLng? = lastKnownLatLng
 
@@ -1049,8 +954,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
                 if (status.routeVersion != corridorRouteVersion) {
                     val route = navigationService.getCurrentRoute()
                     if (route.isNotEmpty()) {
-                        routePolyline?.remove()
-                        routePolyline = null
+                        map.clearRoutePolyline()
                         if (navState == NavState.GUIDING) {
                             tourModeService?.updateRouteCorridor(route)
                         }
@@ -1105,65 +1009,33 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             NavState.NONE -> Unit
         }
     }
-    
+
     // New method to draw route from the navigation service
     private suspend fun drawRouteFromNavigationService() {
         try {
             // Get the route from the navigation service
             val routePoints = navigationService.getCurrentRoute()
-            
+
             // Only proceed if we have no polyline yet or new route points
-            if (routePolyline == null && routePoints.isNotEmpty()) {
+            if (!map.hasRoutePolyline && routePoints.isNotEmpty()) {
                 Timber.d("Drawing route with ${routePoints.size} points from navigation service")
 
                 // Get current location and destination
                 val currentLocation = lastKnownLatLng ?: return
                 val destination = routePoints.lastOrNull() ?: return
 
-                // Make sure destination marker exists
-                if (destinationMarker == null) {
-                    destinationMarker = mMap.addMarker(
-                        MarkerOptions()
-                            .position(destination.toMap())
-                            .title("Destination")
-                            .icon(MarkerIcons.pin(this, MarkerStyling.HUE_RED))
-                    )
-                }
+                map.showDestinationMarker(destination)
+                map.showRoutePolyline(routePoints)
 
-                // Draw the route
-                routePolyline = mMap.addPolyline(
-                    PolylineOptions()
-                        .addAll(routePoints.map { it.toMap() })
-                        .width(4f)
-                        .color(0xFF0080FF.toInt()) // Bright blue
-                )
-
-                // Move camera to show the route
-                val boundsBuilder = LatLngBounds.Builder()
-                    .include(currentLocation.toMap())
-                    .include(destination.toMap())
-
-                // Add route points to bounds
-                routePoints.forEach { boundsBuilder.include(it.toMap()) }
-
-                val bounds = boundsBuilder.build()
-                // Clear any driving-view offset first, and fit the bounds
-                // flat and north-up, or the overview frames the route badly
+                // Move the camera to show the whole route, flat and north-up
                 cameraInDrivingView = false
-                mMap.moveCamera(
-                    CameraUpdateFactory.newCameraPosition(
-                        CameraPosition.Builder(mMap.cameraPosition)
-                            .padding(0.0, 0.0, 0.0, 0.0)
-                            .build()
-                    )
-                )
-                mMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 0.0, 0.0, 100))
+                map.animateToRouteOverview(routePoints, currentLocation)
             }
         } catch (e: Exception) {
             Timber.e(e, "Error drawing route from navigation service: ${e.message}")
         }
     }
-    
+
     // Update camera position for active navigation
     private fun updateCameraForNavigation(currentLocation: LatLng) {
         // Only the guidance phase drives the camera, and not if the user panned away
@@ -1195,34 +1067,20 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             currentLocation
         }
 
-        val cameraPosition = CameraPosition.Builder()
-            .target(target.toMap())
-            .zoom((CameraLogic.zoomForSpeed(lastKnownSpeedMps) - ZOOM_OFFSET).toDouble())
-            .bearing(bearing.toDouble())
-            .tilt(CameraLogic.DRIVING_TILT)
-            .padding(0.0, mapView.height / 3.0, 0.0, 0.0)
-            .build()
-
         // Linear ease matched to the 1 s location cadence, so the camera
         // glides between fixes instead of lurching
-        mMap.easeCamera(
-            CameraUpdateFactory.newCameraPosition(cameraPosition),
-            CameraLogic.CAMERA_EASE_MS,
-            false
+        map.easeDrivingCamera(
+            target,
+            CameraLogic.zoomForSpeed(lastKnownSpeedMps),
+            bearing,
+            CameraLogic.CAMERA_EASE_MS
         )
     }
 
     // Settle back to the flat, north-up follow view once a drive ends
     private fun easeToTopDownFollow(target: LatLng) {
         cameraInDrivingView = false
-        val cameraPosition = CameraPosition.Builder()
-            .target(target.toMap())
-            .zoom(FOLLOW_ZOOM)
-            .bearing(0.0)
-            .tilt(0.0)
-            .padding(0.0, 0.0, 0.0, 0.0)
-            .build()
-        mMap.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
+        map.animateToTopDownFollow(target)
     }
 
     // Get user bearing (direction of travel): the GPS course when we have
@@ -1240,13 +1098,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     private fun updateNavigationStatus(status: NavigationService.NavigationStatus, destinationName: String) {
         // Format distance
         val distanceText = DistanceFormatter.format(status.distanceRemaining)
-        
+
         // Format ETA
         val etaText = if (status.timeRemaining > 0) {
             val minutes = TimeUnit.MILLISECONDS.toMinutes(status.timeRemaining)
             val arrivalTime = Date(System.currentTimeMillis() + status.timeRemaining)
             val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-            
+
             if (minutes < 60) {
                 getString(R.string.eta_format, "$minutes min (${timeFormat.format(arrivalTime)})")
             } else {
@@ -1257,7 +1115,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         } else {
             getString(R.string.eta_calculating)
         }
-        
+
         // Update UI; a preview is a plan, not a drive
         tvNavigationDestination.text = if (navState == NavState.GUIDING) {
             getString(R.string.navigating_to, destinationName)
@@ -1271,7 +1129,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             remaining <= 0 -> 1000
             else -> (1000.0 * (1.0 - (remaining.coerceAtMost(60 * 60 * 1000L).toDouble() / (60 * 60 * 1000L)))).toInt()
         }.coerceIn(0, 1000)
-        
+
         // Turn instructions (and their voice prompts) belong to guidance;
         // a preview stays quiet
         if (navState == NavState.GUIDING) {
@@ -1280,7 +1138,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             }
         }
     }
-    
+
     // Display the next navigation instruction
     private fun showNextInstruction(instruction: NavigationService.NavigationInstruction,
                                     announcementTiming: NavigationService.AnnouncementTiming) {
@@ -1313,7 +1171,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
             }
         }
     }
-    
+
     // Format an instruction for voice announcement
     private fun formatInstructionForVoice(
         instruction: NavigationService.NavigationInstruction,
@@ -1321,25 +1179,25 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
     ): String {
         // Get primary and secondary instructions
         val details = navigationService.getManeuverDetails(instruction)
-        
+
         // Format distance for voice
         val distanceText = DistanceFormatter.spoken(instruction.distance)
-        
+
         // Format based on timing
         return when (timing) {
-            NavigationService.AnnouncementTiming.IMMEDIATE -> 
+            NavigationService.AnnouncementTiming.IMMEDIATE ->
                 "${details.primaryInstruction} now"
-                
+
             NavigationService.AnnouncementTiming.APPROACHING ->
                 "In $distanceText, ${details.primaryInstruction.lowercase()}"
-                
+
             NavigationService.AnnouncementTiming.ADVANCE ->
                 "In $distanceText, ${details.primaryInstruction.lowercase()}"
-                
+
             else -> details.primaryInstruction
         }
     }
-    
+
     // Show the turn instruction fragment
     private fun showTurnInstructionFragment(
         instruction: NavigationService.NavigationInstruction,
@@ -1353,25 +1211,25 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
                 .replace(R.id.turn_instruction_container, turnInstructionFragment!!)
                 .commit()
         }
-        
+
         // Show the container
         findViewById<View>(R.id.turn_instruction_container).visibility = View.VISIBLE
-        
+
         // Update the instruction
         turnInstructionFragment?.updateInstruction(instruction, maneuverDetails, announcementTiming)
     }
-    
+
     // Hide the turn instruction fragment - implements NavigationInstructionController
     override fun hideTurnInstructions() {
         findViewById<View>(R.id.turn_instruction_container).visibility = View.GONE
     }
-    
+
     // Get maneuver details for an instruction - implements NavigationDetailsProvider
-    override fun getManeuverDetails(instruction: NavigationService.NavigationInstruction): 
+    override fun getManeuverDetails(instruction: NavigationService.NavigationInstruction):
             NavigationService.ManeuverDetails {
         return navigationService.getManeuverDetails(instruction)
     }
-    
+
     // Stop navigation
     private fun stopNavigation() {
         // Stop the in-flight work first, whether that's a geocode, a route
@@ -1385,10 +1243,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         searchBarCard.visibility = View.VISIBLE
 
         // Remove route from map
-        routePolyline?.let { mMap.removePolyline(it) }
-        routePolyline = null
-        destinationMarker?.let { mMap.removeMarker(it) }
-        destinationMarker = null
+        map.clearRoutePolyline()
+        map.clearDestinationMarker()
 
         // Stop navigation service
         navigationService.stopNavigation()
@@ -1401,8 +1257,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, MapLibreMap.OnMark
         lastAnnouncementKey = null
     }
 
-    // Open the destination search sheet (Photon geocoder — no Google APIs).
-    // No type filter: users can search businesses and street addresses alike.
+    // Open the destination search sheet (Photon or Google Places Text
+    // Search, per the map-provider setting). No type filter: users can
+    // search businesses and street addresses alike.
     private fun launchDestinationSearch() {
         if (supportFragmentManager.findFragmentByTag(DestinationSearchBottomSheet.TAG) == null) {
             DestinationSearchBottomSheet.newInstance()

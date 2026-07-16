@@ -10,8 +10,10 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.spiritwisestudios.gpstracker.domain.model.MapProvider
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
+import com.spiritwisestudios.gpstracker.util.GoogleMapStyles
 import com.spiritwisestudios.gpstracker.util.MapStyles
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -47,6 +49,9 @@ class UserPreferencesRepository @Inject constructor(
         // Deliberately a fresh key: "map_type" stored GoogleMap constants
         // before the MapLibre migration, which don't map onto styles.
         val MAP_STYLE = intPreferencesKey("map_style")
+        val MAP_PROVIDER = stringPreferencesKey("map_provider")
+        val GOOGLE_MAP_STYLE = intPreferencesKey("google_map_style")
+        val MAP_TRAFFIC = booleanPreferencesKey("map_traffic")
     }
 
     companion object {
@@ -134,6 +139,48 @@ class UserPreferencesRepository @Inject constructor(
     suspend fun setMapStyle(style: Int) {
         context.userPreferencesDataStore.edit { preferences ->
             preferences[PreferencesKeys.MAP_STYLE] = style
+        }
+    }
+
+    /**
+     * Which mapping stack to use — OpenStreetMap unless the user opted into
+     * Google Maps. Reads sanitize unknown stored names back to the default.
+     */
+    val mapProviderFlow: Flow<MapProvider> = context.userPreferencesDataStore.data
+        .map { preferences ->
+            MapProvider.fromStorage(preferences[PreferencesKeys.MAP_PROVIDER])
+        }
+
+    suspend fun setMapProvider(provider: MapProvider) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[PreferencesKeys.MAP_PROVIDER] = provider.name
+        }
+    }
+
+    /**
+     * Layers-sheet style for the Google map, kept separately from the
+     * OpenFreeMap style so switching providers forgets neither choice.
+     */
+    val googleMapStyleFlow: Flow<Int> = context.userPreferencesDataStore.data
+        .map { preferences ->
+            GoogleMapStyles.normalize(preferences[PreferencesKeys.GOOGLE_MAP_STYLE])
+        }
+
+    suspend fun setGoogleMapStyle(style: Int) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[PreferencesKeys.GOOGLE_MAP_STYLE] = style
+        }
+    }
+
+    /** The layers-sheet traffic overlay toggle (Google map only). */
+    val mapTrafficFlow: Flow<Boolean> = context.userPreferencesDataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.MAP_TRAFFIC] ?: false
+        }
+
+    suspend fun setMapTraffic(enabled: Boolean) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[PreferencesKeys.MAP_TRAFFIC] = enabled
         }
     }
 

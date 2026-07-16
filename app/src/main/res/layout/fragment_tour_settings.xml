@@ -245,6 +245,44 @@
             android:checked="false"
             android:layout_marginTop="8dp" />
 
+        <!-- Map Provider Section -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/map_provider_title"
+            android:textAppearance="?attr/textAppearanceHeadline6"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="8dp" />
+
+        <RadioGroup
+            android:id="@+id/rg_map_provider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/rb_provider_osm"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/map_provider_osm" />
+
+            <RadioButton
+                android:id="@+id/rb_provider_google"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/map_provider_google" />
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/tv_provider_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/map_provider_google_needs_key"
+            android:textAppearance="?attr/textAppearanceCaption"
+            android:visibility="gone" />
+
         <!-- Buttons -->
         <LinearLayout
             android:layout_width="match_parent"

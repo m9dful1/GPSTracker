@@ -18,8 +18,9 @@
         android:text="@string/map_style"
         android:textAppearance="?attr/textAppearanceSubtitle2" />
 
+    <!-- OpenFreeMap styles (OpenStreetMap provider) -->
     <RadioGroup
-        android:id="@+id/rg_map_type"
+        android:id="@+id/rg_map_style"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical">
@@ -52,5 +53,52 @@
             android:minHeight="48dp"
             android:text="@string/map_style_dark" />
     </RadioGroup>
+
+    <!-- Google map types (Google provider); hidden otherwise -->
+    <RadioGroup
+        android:id="@+id/rg_map_style_google"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <RadioButton
+            android:id="@+id/rb_gmap_default"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/map_style_default" />
+
+        <RadioButton
+            android:id="@+id/rb_gmap_satellite"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/map_style_satellite" />
+
+        <RadioButton
+            android:id="@+id/rb_gmap_terrain"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/map_style_terrain" />
+    </RadioGroup>
+
+    <TextView
+        android:id="@+id/tv_map_details_label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/map_details"
+        android:textAppearance="?attr/textAppearanceSubtitle2"
+        android:visibility="gone" />
+
+    <com.google.android.material.switchmaterial.SwitchMaterial
+        android:id="@+id/switch_traffic"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="48dp"
+        android:text="@string/map_traffic"
+        android:visibility="gone" />
 
 </LinearLayout>

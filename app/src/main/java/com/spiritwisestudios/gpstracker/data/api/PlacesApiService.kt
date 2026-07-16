@@ -25,7 +25,7 @@ import java.io.IOException
 class PlacesApiService(
     private val httpClient: OkHttpClient,
     private val baseUrl: String = DEFAULT_BASE_URL
-) {
+) : PlacesApi {
 
     companion object {
         private const val DEFAULT_BASE_URL = "https://overpass-api.de"
@@ -197,7 +197,7 @@ class PlacesApiService(
     /**
      * Find tour-worthy points of interest around a location.
      */
-    suspend fun getNearbyPlaces(center: LatLng, radius: Int): List<PointOfInterest> {
+    override suspend fun getNearbyPlaces(center: LatLng, radius: Int): List<PointOfInterest> {
         val response = runQuery(buildNearbyQuery(center, radius))
         return parseElementsResponse(response, center)
     }
@@ -205,7 +205,7 @@ class PlacesApiService(
     /**
      * Get detailed information about a specific place (an OSM element id).
      */
-    suspend fun getPlaceDetails(placeId: String): PointOfInterest {
+    override suspend fun getPlaceDetails(placeId: String): PointOfInterest {
         val query = buildDetailsQuery(placeId)
             ?: throw IOException("Not an OSM place id: $placeId")
 
