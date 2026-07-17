@@ -160,6 +160,21 @@ class TourLogicTest {
         assertTrue(TourLogic.corridorAnnouncement(8)!!.contains("8 interesting places"))
     }
 
+    // --- tourWelcomeAnnouncement ---
+
+    @Test
+    fun `tour welcome names the tour`() {
+        val welcome = TourLogic.tourWelcomeAnnouncement("Las Vegas Strip", 8)
+        assertTrue(welcome.contains("Welcome to your Las Vegas Strip tour"))
+        assertTrue(welcome.contains("8 interesting places"))
+    }
+
+    @Test
+    fun `tour welcome handles one or no places`() {
+        assertTrue(TourLogic.tourWelcomeAnnouncement("Hoover Dam", 1).contains("1 interesting place"))
+        assertTrue(TourLogic.tourWelcomeAnnouncement("Hoover Dam", 0).contains("still looking"))
+    }
+
     // --- tripSummaryPhrase ---
 
     @Test
@@ -178,6 +193,69 @@ class TourLogicTest {
     fun `multiple narrations are counted in the summary`() {
         val phrase = TourLogic.tripSummaryPhrase(7)!!
         assertTrue(phrase.contains("7 places"))
+    }
+
+    @Test
+    fun `summary calls back the drive's highlight`() {
+        val phrase = TourLogic.tripSummaryPhrase(7, "Fort Point")!!
+        assertTrue(phrase.contains("including Fort Point"))
+    }
+
+    @Test
+    fun `a single-place summary skips the redundant highlight`() {
+        // "1 place, including it" would name the same place twice
+        val phrase = TourLogic.tripSummaryPhrase(1, "Fort Point")!!
+        assertFalse(phrase.contains("including"))
+    }
+
+    // --- highlightWorthiness ---
+
+    @Test
+    fun `the fort outranks the equally rated sandwich shop as highlight`() {
+        assertTrue(
+            TourLogic.highlightWorthiness("HISTORICAL", 4.8) >
+                TourLogic.highlightWorthiness("DINING", 4.8)
+        )
+    }
+
+    @Test
+    fun `rating breaks highlight ties within a category`() {
+        assertTrue(
+            TourLogic.highlightWorthiness("CULTURAL", 4.8) >
+                TourLogic.highlightWorthiness("CULTURAL", 3.0)
+        )
+    }
+
+    // --- upNextPhrase ---
+
+    @Test
+    fun `up next bridge names the queued place`() {
+        assertEquals("Up next: Fort Point.", TourLogic.upNextPhrase("Fort Point"))
+        assertEquals(null, TourLogic.upNextPhrase(null))
+    }
+
+    // --- narrationIsStale ---
+
+    @Test
+    fun `a place well behind the listener is stale`() {
+        assertTrue(TourLogic.narrationIsStale(TourLogic.RelativeDirection.BEHIND, 800f))
+    }
+
+    @Test
+    fun `a place just behind is still worth narrating`() {
+        assertFalse(TourLogic.narrationIsStale(TourLogic.RelativeDirection.BEHIND, 200f))
+    }
+
+    @Test
+    fun `places ahead or beside are never stale`() {
+        assertFalse(TourLogic.narrationIsStale(TourLogic.RelativeDirection.AHEAD, 5_000f))
+        assertFalse(TourLogic.narrationIsStale(TourLogic.RelativeDirection.LEFT, 5_000f))
+    }
+
+    @Test
+    fun `unknown direction or distance is never stale`() {
+        assertFalse(TourLogic.narrationIsStale(null, 5_000f))
+        assertFalse(TourLogic.narrationIsStale(TourLogic.RelativeDirection.BEHIND, null))
     }
 
     // --- detailLevelFor ---

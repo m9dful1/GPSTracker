@@ -61,6 +61,28 @@ class ContentServiceImpl(
         }
 
         /**
+         * Make encyclopedia text speakable. Wikipedia intros are written for
+         * the page, not the ear: pronunciation guides in parentheses, IPA,
+         * footnote markers. A TTS engine reads all of it aloud, so
+         * parenthetical asides and bracketed references are dropped
+         * (innermost first, so nested parentheticals unwrap fully) and
+         * whitespace is healed around the cuts.
+         */
+        internal fun cleanForSpeech(text: String): String {
+            var cleaned = text
+            val parenthetical = Regex("\\([^()]*\\)")
+            do {
+                val before = cleaned
+                cleaned = parenthetical.replace(cleaned, "")
+            } while (cleaned != before)
+            return cleaned
+                .replace(Regex("\\[[^\\[\\]]*]"), "")
+                .replace(Regex("\\s+([.,;:!?])"), "$1")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+        }
+
+        /**
          * Trim content to the user's detail level on sentence boundaries.
          */
         internal fun trimToDetailLevel(text: String, level: UserPreferences.DetailLevel): String {
@@ -142,7 +164,7 @@ class ContentServiceImpl(
         val script = geminiApiService.writeTourScript(
             placeName = poi.name,
             category = poi.category,
-            referenceNotes = article.extract.trim(),
+            referenceNotes = cleanForSpeech(article.extract),
             extraDetails = listOfNotNull(
                 poi.address.takeIf { it.isNotEmpty() },
                 poi.description?.takeIf { it.isNotEmpty() }
@@ -216,21 +238,23 @@ class ContentServiceImpl(
         poi: PointOfInterest,
         article: WikipediaApiService.WikiArticle
     ): TourContent {
-        val intro = "You are near ${poi.name}. "
-        val body = article.extract.trim()
+        // No "You are near X" lead-in: the spoken delivery already opens
+        // with "On your left: X." and repeating the name back to back is
+        // exactly the encyclopedia-being-read-aloud sound a guide avoids
+        val body = cleanForSpeech(article.extract)
 
         return TourContent(
             id = UUID.randomUUID().toString(),
             poiId = poi.id,
             title = "About ${poi.name}",
-            content = intro + body,
+            content = body,
             summary = trimToDetailLevel(body, UserPreferences.DetailLevel.BRIEF),
             source = TourContent.ContentSource.THIRD_PARTY,
             metadata = mapOf(
                 "sourceUrl" to article.url,
                 "wikipediaTitle" to article.title
             ),
-            audioDuration = (intro.length + body.length) / 20 // ~20 chars per second
+            audioDuration = body.length / 20 // ~20 chars per second
         )
     }
 
@@ -239,8 +263,8 @@ class ContentServiceImpl(
      */
     private fun buildFallbackContent(poi: PointOfInterest): TourContent {
         val content = buildString {
-            append("You are near ${poi.name}. ")
-
+            // Like the article path, the place name is left to the spoken
+            // positional intro rather than repeated here
             when (poi.category.uppercase()) {
                 "HISTORICAL" -> append("This site has historical significance in the area. ")
                 "CULTURAL" -> append("This place showcases the culture of the region. ")

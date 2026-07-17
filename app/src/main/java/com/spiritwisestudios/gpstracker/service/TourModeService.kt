@@ -100,6 +100,18 @@ class TourModeService : Service() {
     // arrival summary ("you heard about 7 places along the way")
     private var tripNarrationCount = 0
 
+    // The drive's most memorable narrated place, called back in the
+    // arrival summary the way a guide closes on the highlight
+    private var tripHighlightName: String? = null
+    private var tripHighlightScore = -1
+
+    // True from the moment a narration is pulled off the queue until the
+    // queue drains, including the scheduled pause between narrations —
+    // isSpeaking() alone would let a geofence event double-deliver during
+    // that pause
+    @Volatile
+    private var isDelivering = false
+
     // When each automatic narration was queued, for the per-hour cap.
     // Entries older than the window are pruned as new ones arrive.
     private val narrationTimes = mutableListOf<Long>()
@@ -283,6 +295,7 @@ class TourModeService : Service() {
 
         // Clear content queue
         contentService.clearContentQueue()
+        isDelivering = false
 
         // Update service state
         _serviceState.value = TourModeState.Inactive
@@ -295,16 +308,21 @@ class TourModeService : Service() {
     /**
      * Register the POIs along a navigation route so narration follows the
      * drive. Called by MainActivity when navigation starts or re-routes.
+     * [tourName] is set when the drive is a planned Take a Tour loop, so
+     * the guide can open with a proper welcome.
      */
-    fun updateRouteCorridor(route: List<LatLng>) {
+    fun updateRouteCorridor(route: List<LatLng>, tourName: String? = null) {
         if (route.isEmpty()) return
 
         serviceScope.launch {
             try {
                 // A fresh corridor starts a new trip; reroutes of the same
                 // drive keep the running count
-                if (!routeCorridorActive) {
+                val freshCorridor = !routeCorridorActive
+                if (freshCorridor) {
                     tripNarrationCount = 0
+                    tripHighlightName = null
+                    tripHighlightScore = -1
                 }
                 routeCorridorActive = true
                 val places = placesRepository.getPlacesAlongRoute(route, DISCOVERY_RADIUS_METERS / 3)
@@ -314,10 +332,17 @@ class TourModeService : Service() {
                 locationAwarenessService.unregisterAllPointsOfInterest()
                 registerPlaces(places)
 
-                // Preview the tour so the driver knows narration is coming
-                if (userPreferences.audioEnabled) {
-                    TourLogic.corridorAnnouncement(places.size)?.let { announcement ->
-                        launch { audioService.speak(announcement).collectLatest {} }
+                // Preview the tour so the driver knows narration is coming —
+                // but only once per drive: re-announcing on every reroute is
+                // the kind of chatter that gets a guide tuned out
+                if (userPreferences.audioEnabled && freshCorridor) {
+                    val announcement = if (tourName != null) {
+                        TourLogic.tourWelcomeAnnouncement(tourName, places.size)
+                    } else {
+                        TourLogic.corridorAnnouncement(places.size)
+                    }
+                    announcement?.let {
+                        launch { audioService.speak(it).collectLatest {} }
                     }
                 }
 
@@ -346,8 +371,10 @@ class TourModeService : Service() {
      * arrival announcement so it rides the same utterance.
      */
     fun consumeTripSummaryPhrase(): String? {
-        val phrase = TourLogic.tripSummaryPhrase(tripNarrationCount)
+        val phrase = TourLogic.tripSummaryPhrase(tripNarrationCount, tripHighlightName)
         tripNarrationCount = 0
+        tripHighlightName = null
+        tripHighlightScore = -1
         return phrase
     }
 
@@ -573,8 +600,8 @@ class TourModeService : Service() {
                 narrationTimes.add(now)
             }
 
-            // If nothing is currently being spoken, start speaking
-            if (!audioService.isSpeaking()) {
+            // If nothing is being spoken or scheduled, start speaking
+            if (!audioService.isSpeaking() && !isDelivering) {
                 deliverNextContent()
             } else {
                 // Mid-narration: surface the newly queued place as "up next"
@@ -590,14 +617,28 @@ class TourModeService : Service() {
      */
     private suspend fun deliverNextContent() {
         try {
+            isDelivering = true
             val content = contentService.getNextContent()
             if (content == null) {
                 _currentNarration.value = null
+                isDelivering = false
+                return
+            }
+
+            val poi = placesRepository.getPlaceDetails(content.poiId).getOrNull()
+
+            // Queued narrations can be overtaken by the drive. A guide
+            // previews what's coming; a place that's already well behind
+            // the listener is a story whose moment has passed — drop it and
+            // move on (it stays unvisited, so a future pass can tell it).
+            val (direction, distanceMeters) = poiGeometry(poi)
+            if (TourLogic.narrationIsStale(direction, distanceMeters)) {
+                Timber.d("Skipping ${content.title}: already ${distanceMeters?.toInt()}m behind")
+                deliverNextContent()
                 return
             }
 
             // Set as current POI
-            val poi = placesRepository.getPlaceDetails(content.poiId).getOrNull()
             currentPoi = poi
 
             _currentNarration.value = Narration(
@@ -611,8 +652,12 @@ class TourModeService : Service() {
             _isNarrationPlaying.value = true
 
             // Speak the content, introduced like a live tour guide
-            // ("On your left: Fort Point. ...")
-            audioService.speak(spokenNarrationFor(poi, content))
+            // ("On your left: Fort Point. ..."). The chain continues after
+            // the flow finishes, so an interrupted utterance (stopped, or
+            // flushed by a newer one) ends the chain cleanly instead of
+            // leaving the delivery flag stuck.
+            var outcome: AudioService.SpeakingStatus? = null
+            audioService.speak(spokenNarrationFor(poi, content, direction, distanceMeters))
                 .collectLatest { status ->
                     when (status) {
                         AudioService.SpeakingStatus.COMPLETED -> {
@@ -623,24 +668,51 @@ class TourModeService : Service() {
                                 placesRepository.saveVisitedPlace(
                                     it.copy(isVisited = true, visitedDate = System.currentTimeMillis())
                                 )
+                                updateTripHighlight(it)
                             }
                             tripNarrationCount++
-
-                            // When complete, deliver the next content if available
-                            deliverNextContent()
+                            outcome = status
                         }
                         AudioService.SpeakingStatus.ERROR -> {
                             Timber.e("Error speaking content for ${content.title}")
-                            // Try next content
-                            deliverNextContent()
+                            outcome = status
                         }
                         else -> {
                             // No action needed for other statuses
                         }
                     }
                 }
+
+            when (outcome) {
+                AudioService.SpeakingStatus.COMPLETED -> {
+                    // Breathing room before the next story: guides leave
+                    // listeners time to look and talk instead of lecturing
+                    // wall to wall
+                    if (contentService.peekNextContent() != null) {
+                        delay(TourLogic.INTER_NARRATION_PAUSE_MS)
+                    }
+                    deliverNextContent()
+                }
+                AudioService.SpeakingStatus.ERROR -> deliverNextContent()
+                // Interrupted mid-utterance: whatever interrupted owns the
+                // audio now; the queue waits for the next trigger
+                else -> isDelivering = false
+            }
         } catch (e: Exception) {
             Timber.e(e, "Error delivering content")
+            isDelivering = false
+        }
+    }
+
+    /**
+     * Track the most memorable narrated place of the drive for the closing
+     * summary's callback.
+     */
+    private fun updateTripHighlight(poi: PointOfInterest) {
+        val score = TourLogic.highlightWorthiness(poi.category, poi.rating)
+        if (score > tripHighlightScore) {
+            tripHighlightScore = score
+            tripHighlightName = poi.name
         }
     }
 
@@ -653,29 +725,51 @@ class TourModeService : Service() {
     }
 
     /**
-     * Prefix the narration with where the place sits relative to the current
-     * direction of travel, and roughly how far away it is. The GPS heading
-     * is only meaningful while moving, so a stationary user gets a neutral
-     * introduction — but still hears the distance, which is exactly what a
-     * parked scout wants to know.
+     * Where a POI currently sits relative to the listener: the quadrant
+     * (only while moving — a GPS heading means nothing when parked) and the
+     * straight-line distance. Used both to introduce the narration and to
+     * drop narrations whose place is already behind the car.
      */
-    private suspend fun spokenNarrationFor(poi: PointOfInterest?, content: TourContent): String {
-        if (poi == null) return content.content
+    private suspend fun poiGeometry(
+        poi: PointOfInterest?
+    ): Pair<TourLogic.RelativeDirection?, Float?> {
+        if (poi == null) return null to null
+        val location = locationAwarenessService.getCurrentLocation() ?: return null to null
 
         val heading = locationAwarenessService.getCurrentHeading()
         val speed = locationAwarenessService.getCurrentSpeed() ?: 0f
-        val location = locationAwarenessService.getCurrentLocation()
-
-        val direction = if (location != null && heading != null && speed >= TourLogic.MIN_HEADING_SPEED_MPS) {
+        val direction = if (heading != null && speed >= TourLogic.MIN_HEADING_SPEED_MPS) {
             TourLogic.relativeDirection(heading, GeoUtils.bearingDegrees(location, poi.latLng))
         } else {
             null
         }
-        val distancePhrase = location?.let {
-            TourLogic.distancePhrase(GeoUtils.distanceMeters(it, poi.latLng))
-        }
+        return direction to GeoUtils.distanceMeters(location, poi.latLng)
+    }
 
-        return "${TourLogic.narrationIntroFor(poi.name, direction, distancePhrase)} ${content.content}"
+    /**
+     * Prefix the narration with where the place sits relative to the current
+     * direction of travel, and roughly how far away it is — the listener
+     * needs to know where to look before hearing why. A stationary user gets
+     * a neutral introduction but still hears the distance, which is exactly
+     * what a parked scout wants to know. When another place is already
+     * queued, a short "Up next" bridge rides the same utterance so the
+     * silence that follows never reads as the app breaking.
+     */
+    private fun spokenNarrationFor(
+        poi: PointOfInterest?,
+        content: TourContent,
+        direction: TourLogic.RelativeDirection?,
+        distanceMeters: Float?
+    ): String {
+        val body = if (poi == null) {
+            // No place details to orient by; the title carries the name
+            "${content.title}. ${content.content}"
+        } else {
+            val distancePhrase = distanceMeters?.let { TourLogic.distancePhrase(it) }
+            "${TourLogic.narrationIntroFor(poi.name, direction, distancePhrase)} ${content.content}"
+        }
+        val upNext = TourLogic.upNextPhrase(upNextTitle())
+        return if (upNext != null) "$body $upNext" else body
     }
 
     /**

@@ -28,10 +28,14 @@ narrate from the parsed article even when a key is configured (see
 
 - `GeminiApiService` (`data/api/`) sends the place's **verified reference
   notes** — the Wikipedia intro plus OSM details — and asks for at most four
-  spoken sentences, best detail first, thinking disabled for speed. The model
-  is instructed to use only the provided facts and to say less when the notes
-  are thin, so it cannot invent history for undocumented places. Places with
-  no Wikipedia article never reach the model at all.
+  spoken sentences, thinking disabled for speed. The prompt encodes trained
+  guide craft (see `tour_guide_research.md`): one idea per stop, the
+  road-visible feature first, people and feeling over dates, folklore
+  labeled as folklore, and a closing line that gives the listener something
+  to look for. The model is instructed to use only the provided facts and to
+  say less when the notes are thin, so it cannot invent history for
+  undocumented places. Places with no Wikipedia article never reach the
+  model at all.
 - `ContentServiceImpl` tries the AI script first, caches the result in Room
   (one generation per place, ever), and falls back to the plain Wikipedia
   intro when the key is missing, the device is offline, the request times out

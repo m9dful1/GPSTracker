@@ -36,6 +36,47 @@ class ContentServiceImplTest {
     }
 
     @Test
+    fun `pronunciation asides are cut before speech`() {
+        // The classic Wikipedia opener: IPA and translations in parentheses
+        // that a TTS engine would read letter by letter
+        assertEquals(
+            "San Francisco is a commercial and cultural hub.",
+            ContentServiceImpl.cleanForSpeech(
+                "San Francisco (/ˌsæn frənˈsɪskoʊ/; Spanish for 'Saint Francis') " +
+                    "is a commercial and cultural hub."
+            )
+        )
+    }
+
+    @Test
+    fun `nested parentheticals unwrap fully`() {
+        assertEquals(
+            "The fort guarded the bay.",
+            ContentServiceImpl.cleanForSpeech(
+                "The fort (completed in 1861 (during the Civil War)) guarded the bay."
+            )
+        )
+    }
+
+    @Test
+    fun `reference markers and stray whitespace are healed`() {
+        assertEquals(
+            "The bridge opened in 1937. It is painted orange.",
+            ContentServiceImpl.cleanForSpeech(
+                "The bridge opened in 1937.[1]  It is  painted orange .[citation needed]"
+            )
+        )
+    }
+
+    @Test
+    fun `clean text passes through unchanged`() {
+        assertEquals(
+            "A plain sentence stays as it is.",
+            ContentServiceImpl.cleanForSpeech("A plain sentence stays as it is.")
+        )
+    }
+
+    @Test
     fun `cached content serves when it matches the tier's narration`() {
         // Premium (AI narration) keeps its AI scripts; standard keeps its
         // parsed articles

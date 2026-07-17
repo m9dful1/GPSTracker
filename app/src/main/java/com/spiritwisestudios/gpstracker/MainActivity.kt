@@ -178,6 +178,10 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     private enum class NavState { NONE, PREVIEW, GUIDING }
     private var navState = NavState.NONE
 
+    // Name of the planned tour being driven, if any — the tour guide opens
+    // a named tour with a welcome instead of the generic route preview
+    private var activeTourName: String? = null
+
     // Service connection for binding to the TourModeService
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -997,6 +1001,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
     // DestinationSearchHost: a search result was picked — preview the route
     override fun onDestinationSelected(name: String, latLng: LatLng) {
+        activeTourName = null // an ordinary drive, not a planned tour
         navigationJob?.cancel()
         navigationJob = lifecycleScope.launch {
             startActiveNavigation(latLng, name)
@@ -1014,6 +1019,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         if (!isTourModeActive) {
             startTourMode()
         }
+        activeTourName = plan.name // the guide opens with a tour welcome
         navigationJob?.cancel()
         navigationJob = lifecycleScope.launch {
             startActiveNavigation(plan.destination, plan.name, plan.stops.map { it.latLng })
@@ -1056,7 +1062,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
                     if (route.isNotEmpty()) {
                         map.clearRoutePolyline()
                         if (navState == NavState.GUIDING) {
-                            tourModeService?.updateRouteCorridor(route)
+                            tourModeService?.updateRouteCorridor(route, activeTourName)
                         }
                         corridorRouteVersion = status.routeVersion
                     }
@@ -1093,7 +1099,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         lifecycleScope.launch {
             val route = navigationService.getCurrentRoute()
             if (route.isNotEmpty()) {
-                tourModeService?.updateRouteCorridor(route)
+                tourModeService?.updateRouteCorridor(route, activeTourName)
             }
         }
     }
@@ -1356,6 +1362,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
         // Back to discovering POIs around the current position
         tourModeService?.clearRouteCorridor()
+        activeTourName = null
 
         // Clear location history and announcement state
         locationHistory.clear()

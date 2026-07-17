@@ -60,6 +60,25 @@ object TourLogic {
     }
 
     /**
+     * A queued narration goes stale once its place is this far behind the
+     * listener. Just past (a block or so) still reads naturally as "just
+     * behind you"; beyond this the moment is gone.
+     */
+    const val STALE_BEHIND_METERS = 250f
+
+    /**
+     * Whether a queued narration should be dropped because its place has
+     * already fallen behind the listener. A guide previews what's coming;
+     * narrating something the car left a half mile back is the classic
+     * audio-tour failure ("don't play stale you-are-passing audio late").
+     * Unknown direction or distance never counts as stale.
+     */
+    fun narrationIsStale(direction: RelativeDirection?, distanceMeters: Float?): Boolean {
+        return direction == RelativeDirection.BEHIND &&
+            distanceMeters != null && distanceMeters > STALE_BEHIND_METERS
+    }
+
+    /**
      * A distance rounded for speech, in imperial units. GPS and geofence
      * jitter make precise numbers fake, so values are rounded coarsely;
      * within 75 m (~250 ft) a callout is noise ("you're there"), so null
@@ -128,17 +147,63 @@ object TourLogic {
     }
 
     /**
-     * Closing line spoken on arrival, summarizing the drive's tour.
-     * Null when nothing was narrated — stay quiet rather than announce
-     * an empty tour.
+     * Spoken welcome when a planned Take a Tour drive begins. A real tour
+     * opens by naming the tour and setting expectations (the welcome/
+     * orientation phase every guiding curriculum teaches), not with the
+     * generic route line.
      */
-    fun tripSummaryPhrase(narratedCount: Int): String? {
+    fun tourWelcomeAnnouncement(tourName: String, placeCount: Int): String {
+        val opening = "Welcome to your $tourName tour."
+        return when {
+            placeCount <= 0 ->
+                "$opening I'm still looking for interesting places along the loop — I'll point them out as we go."
+            placeCount == 1 ->
+                "$opening There's 1 interesting place along the way, and I'll tell you about it as we get close."
+            else ->
+                "$opening There are $placeCount interesting places along the way — I'll point out each one as we reach it. Enjoy the drive."
+        }
+    }
+
+    /**
+     * Short spoken bridge to the next queued place, appended after a
+     * narration ends. Tour scripting calls this a suffix story: telling
+     * the listener what's coming kills the is-the-app-broken silence and
+     * gives them something to watch for.
+     */
+    fun upNextPhrase(nextPlaceName: String?): String? {
+        return nextPlaceName?.let { "Up next: $it." }
+    }
+
+    /**
+     * How memorable a narrated place is for the end-of-drive summary:
+     * intrinsic category interest dominates, crowd rating breaks ties.
+     */
+    fun highlightWorthiness(category: String, rating: Double?): Int {
+        return categoryInterestWeight(category) * 2 + ratingPoints(rating)
+    }
+
+    /**
+     * Closing line spoken on arrival, summarizing the drive's tour, with a
+     * callback to its most memorable place — guides close by paying off the
+     * highlight, not just counting stops. Null when nothing was narrated —
+     * stay quiet rather than announce an empty tour.
+     */
+    fun tripSummaryPhrase(narratedCount: Int, highlightName: String? = null): String? {
         return when {
             narratedCount <= 0 -> null
             narratedCount == 1 -> "That concludes today's tour: you heard about 1 place along the way."
+            highlightName != null ->
+                "That concludes today's tour: you heard about $narratedCount places along the way, including $highlightName."
             else -> "That concludes today's tour: you heard about $narratedCount places along the way."
         }
     }
+
+    /**
+     * Breathing room between back-to-back narrations. Guides are trained to
+     * stay quiet between places — time to look, time to talk — instead of
+     * lecturing wall to wall; only the gap is scheduled, never a cutoff.
+     */
+    const val INTER_NARRATION_PAUSE_MS = 8_000L
 
     /** Sliding window for the narrations-per-hour cap. */
     const val NARRATION_WINDOW_MS = 60L * 60L * 1000L
@@ -257,14 +322,7 @@ object TourLogic {
         }
 
         // POI rating (0-5 scale, add 0-3 priority points)
-        poi.rating?.let { rating ->
-            priority += when {
-                rating >= 4.5 -> 3
-                rating >= 4.0 -> 2
-                rating >= 3.5 -> 1
-                else -> 0
-            }
-        }
+        priority += ratingPoints(poi.rating)
 
         // Preferred categories get a boost
         val poiCategory = try {
@@ -282,5 +340,16 @@ object TourLogic {
         }
 
         return priority.coerceAtLeast(0)
+    }
+
+    /** A crowd rating on the 0-5 scale as 0-3 priority points. */
+    internal fun ratingPoints(rating: Double?): Int {
+        return when {
+            rating == null -> 0
+            rating >= 4.5 -> 3
+            rating >= 4.0 -> 2
+            rating >= 3.5 -> 1
+            else -> 0
+        }
     }
 }
