@@ -31,10 +31,16 @@ object AdsInitializer {
     private val pending = mutableListOf<() -> Unit>()
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    /** Call once from Application.onCreate. */
-    fun install(application: Application) {
+    /**
+     * Call once from Application.onCreate. [adsAllowed] gates every ad
+     * load and show — a premium account answers false. The SDK itself
+     * still initializes so a mid-session tier change (debug toggle, a
+     * future purchase or refund) needs no process restart.
+     */
+    fun install(application: Application, adsAllowed: () -> Boolean = { true }) {
         if (hasInstalled) return
         hasInstalled = true
+        InterstitialAdManager.adsAllowed = adsAllowed
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(LifecycleEventObserver { _, event ->
             if (!hasRun && (event == Lifecycle.Event.ON_START || event == Lifecycle.Event.ON_RESUME)) {

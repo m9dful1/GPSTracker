@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.spiritwisestudios.gpstracker.domain.model.AccountTier
 import com.spiritwisestudios.gpstracker.domain.model.MapProvider
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
@@ -52,6 +53,7 @@ class UserPreferencesRepository @Inject constructor(
         val MAP_PROVIDER = stringPreferencesKey("map_provider")
         val GOOGLE_MAP_STYLE = intPreferencesKey("google_map_style")
         val MAP_TRAFFIC = booleanPreferencesKey("map_traffic")
+        val ACCOUNT_TIER = stringPreferencesKey("account_tier")
     }
 
     companion object {
@@ -154,6 +156,22 @@ class UserPreferencesRepository @Inject constructor(
     suspend fun setMapProvider(provider: MapProvider) {
         context.userPreferencesDataStore.edit { preferences ->
             preferences[PreferencesKeys.MAP_PROVIDER] = provider.name
+        }
+    }
+
+    /**
+     * The account tier: STANDARD (ads, parsed narration) or PREMIUM
+     * (no ads, Gemini narration). Unknown stored names fall back to
+     * STANDARD.
+     */
+    val accountTierFlow: Flow<AccountTier> = context.userPreferencesDataStore.data
+        .map { preferences ->
+            AccountTier.fromStorage(preferences[PreferencesKeys.ACCOUNT_TIER])
+        }
+
+    suspend fun setAccountTier(tier: AccountTier) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[PreferencesKeys.ACCOUNT_TIER] = tier.name
         }
     }
 

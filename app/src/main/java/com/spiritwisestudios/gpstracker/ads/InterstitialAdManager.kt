@@ -24,6 +24,12 @@ import timber.log.Timber
  */
 object InterstitialAdManager {
 
+    /**
+     * Account-tier gate, set by [AdsInitializer.install]; when it answers
+     * false (premium account) nothing loads and [showAd] is a pass-through.
+     */
+    var adsAllowed: () -> Boolean = { true }
+
     private var interstitialAd: InterstitialAd? = null
     private var isLoading = false
 
@@ -36,7 +42,7 @@ object InterstitialAdManager {
 
     /** Pre-load an interstitial. Safe to call any time. */
     fun loadAd(context: Context) {
-        if (isLoading || interstitialAd != null) return
+        if (!adsAllowed() || isLoading || interstitialAd != null) return
         isLoading = true
         try {
             InterstitialAd.load(
@@ -75,6 +81,10 @@ object InterstitialAdManager {
      * caller never waits on an ad. Either way the next ad starts loading.
      */
     fun showAd(activity: Activity, onFinished: () -> Unit = {}) {
+        if (!adsAllowed()) {
+            onFinished()
+            return
+        }
         val ad = interstitialAd
         if (ad == null) {
             loadAd(activity)

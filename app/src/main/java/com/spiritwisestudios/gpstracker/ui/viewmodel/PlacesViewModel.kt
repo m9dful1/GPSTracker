@@ -5,6 +5,7 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.asLiveData
+import com.spiritwisestudios.gpstracker.domain.model.AccountTier
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.model.MapProvider
 import com.spiritwisestudios.gpstracker.domain.repository.PlacesRepository
@@ -276,6 +277,17 @@ class PlacesViewModel @Inject constructor(
     fun setMapProvider(provider: MapProvider) {
         viewModelScope.launch {
             userPreferencesRepository.setMapProvider(provider)
+        }
+    }
+
+    /**
+     * Persist the account tier (the debug testing toggle today). Runs in
+     * the ViewModel scope so the write survives the settings sheet
+     * dismissing and the activity recreating right after.
+     */
+    fun setAccountTier(tier: AccountTier) {
+        viewModelScope.launch {
+            userPreferencesRepository.setAccountTier(tier)
         }
     }
     

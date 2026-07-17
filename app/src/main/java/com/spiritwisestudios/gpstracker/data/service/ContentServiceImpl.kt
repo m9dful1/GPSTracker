@@ -4,6 +4,7 @@ import com.spiritwisestudios.gpstracker.data.api.GeminiApiService
 import com.spiritwisestudios.gpstracker.data.api.WikipediaApiService
 import com.spiritwisestudios.gpstracker.data.db.dao.TourContentDao
 import com.spiritwisestudios.gpstracker.data.db.entity.TourContentEntity
+import com.spiritwisestudios.gpstracker.data.repository.AccountTierHolder
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.TourContent
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
@@ -17,18 +18,20 @@ import java.util.UUID
 
 /**
  * Content service that narrates real facts: it looks up the Wikipedia article
- * for a place, then (when a Gemini key is configured) has the model rewrite
- * those facts into a brief tour-guide script — the most interesting details,
- * spoken style. Results are cached in Room. Without a key, or when the model
- * fails, the article intro is narrated directly; with no article at all, a
- * simple place-details template is used. The AI never writes without
- * reference facts, so it can't invent history for undocumented places.
+ * for a place, then (for premium accounts with a Gemini key configured) has
+ * the model rewrite those facts into a brief tour-guide script — the most
+ * interesting details, spoken style. Results are cached in Room. On the
+ * standard tier, without a key, or when the model fails, the parsed article
+ * intro is narrated directly; with no article at all, a simple place-details
+ * template is used. The AI never writes without reference facts, so it can't
+ * invent history for undocumented places.
  */
 class ContentServiceImpl(
     private val wikipediaApiService: WikipediaApiService,
     private val geminiApiService: GeminiApiService,
     private val tourContentDao: TourContentDao,
-    private val connectivityChecker: ConnectivityChecker
+    private val connectivityChecker: ConnectivityChecker,
+    private val accountTierHolder: AccountTierHolder
 ) : ContentService {
 
     private val deliveryQueue = ContentDeliveryQueue()
@@ -42,6 +45,20 @@ class ContentServiceImpl(
 
         // Cap prefetching so a busy corridor doesn't fire dozens of requests
         private const val MAX_PREFETCH = 10
+
+        /**
+         * Whether a cached item matches what the account tier would
+         * generate today. AI scripts belong to premium narration and
+         * parsed/template content to standard, so a tier change (or a
+         * newly added Gemini key) regenerates instead of serving the
+         * other tier's cache.
+         */
+        internal fun cacheMatchesTier(
+            cachedSource: TourContent.ContentSource,
+            aiNarration: Boolean
+        ): Boolean {
+            return (cachedSource == TourContent.ContentSource.AI_GENERATED) == aiNarration
+        }
 
         /**
          * Trim content to the user's detail level on sentence boundaries.
@@ -77,10 +94,20 @@ class ContentServiceImpl(
         pointOfInterest: PointOfInterest,
         userPreferences: UserPreferences
     ): TourContent {
-        // Serve from the Room cache when possible (stored untrimmed)
+        // Gemini scripts are the premium experience; standard accounts get
+        // the parsed article narration even when a key is configured
+        val aiNarration = accountTierHolder.isPremium && geminiApiService.isConfigured
+
+        // Serve from the Room cache when possible (stored untrimmed) —
+        // unless it was written for the other tier, in which case it is
+        // regenerated (and replaces the cached row, keyed by place)
         tourContentDao.getContentForPoi(pointOfInterest.id)?.let { cached ->
-            Timber.d("Returning cached content for ${pointOfInterest.name}")
-            return cached.toDomainModel().trimmedTo(userPreferences.contentDetailLevel)
+            val content = cached.toDomainModel()
+            if (cacheMatchesTier(content.source, aiNarration)) {
+                Timber.d("Returning cached content for ${pointOfInterest.name}")
+                return content.trimmedTo(userPreferences.contentDetailLevel)
+            }
+            Timber.d("Cached content for ${pointOfInterest.name} is from the other tier; regenerating")
         }
 
         val article = wikipediaApiService.findArticleFor(
@@ -90,7 +117,7 @@ class ContentServiceImpl(
         )
 
         return if (article != null) {
-            val content = buildAiContent(pointOfInterest, article)
+            val content = (if (aiNarration) buildAiContent(pointOfInterest, article) else null)
                 ?: buildWikipediaContent(pointOfInterest, article)
             // Only real articles are worth caching; template fallbacks would
             // pin a boring result even after connectivity returns.

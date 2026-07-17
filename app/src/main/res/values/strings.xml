@@ -74,6 +74,12 @@
     <string name="ad_privacy_updated">Ad privacy preferences updated</string>
     <string name="ad_privacy_unavailable">Ad privacy options aren\'t available right now</string>
 
+    <!-- Account tier (settings toggle is debug-only) -->
+    <string name="account_tier_title">Account (testing)</string>
+    <string name="account_tier_standard">Standard — ads, article narration</string>
+    <string name="account_tier_premium">Premium — ad-free, AI narration</string>
+    <string name="account_tier_debug_hint">Debug builds only. Release builds stay on Standard until an upgrade purchase sets Premium.</string>
+
     <!-- Take a Tour -->
     <string name="take_a_tour_title">Take a Tour</string>
     <string name="take_a_tour_description">Take a tour</string>

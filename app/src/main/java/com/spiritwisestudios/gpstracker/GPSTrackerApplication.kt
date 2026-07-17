@@ -2,6 +2,7 @@ package com.spiritwisestudios.gpstracker
 
 import android.app.Application
 import com.spiritwisestudios.gpstracker.ads.AdsInitializer
+import com.spiritwisestudios.gpstracker.data.repository.AccountTierHolder
 import com.spiritwisestudios.gpstracker.data.repository.MapProviderHolder
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
 import com.spiritwisestudios.gpstracker.domain.model.MapProvider
@@ -21,6 +22,9 @@ class GPSTrackerApplication : Application() {
     @Inject
     lateinit var mapProviderHolder: MapProviderHolder
 
+    @Inject
+    lateinit var accountTierHolder: AccountTierHolder
+
     override fun onCreate() {
         super.onCreate()
 
@@ -33,20 +37,25 @@ class GPSTrackerApplication : Application() {
         // The OpenStreetMap tiles it renders need no API key.
         MapLibre.getInstance(this)
 
-        // Ads start after the first rendered frame so they never slow launch
-        AdsInitializer.install(this)
-
-        // Seed the provider holder before any activity needs it — a blocking
-        // read, but of one small DataStore file, once per process. Google
-        // without a key falls back to OpenStreetMap so a removed key can't
-        // leave the app on a blank map.
-        val stored = runBlocking { userPreferencesRepository.mapProviderFlow.first() }
+        // Seed the provider and tier holders before any activity needs them
+        // — a blocking read, but of one small DataStore file, once per
+        // process. Google without a key falls back to OpenStreetMap so a
+        // removed key can't leave the app on a blank map.
+        val (storedProvider, storedTier) = runBlocking {
+            userPreferencesRepository.mapProviderFlow.first() to
+                userPreferencesRepository.accountTierFlow.first()
+        }
         mapProviderHolder.set(
-            if (stored == MapProvider.GOOGLE && BuildConfig.MAPS_API_KEY.isBlank()) {
+            if (storedProvider == MapProvider.GOOGLE && BuildConfig.MAPS_API_KEY.isBlank()) {
                 MapProvider.OPEN_STREET_MAP
             } else {
-                stored
+                storedProvider
             }
         )
+        accountTierHolder.set(storedTier)
+
+        // Ads start after the first rendered frame so they never slow
+        // launch — and only for standard accounts; premium rides ad-free
+        AdsInitializer.install(this) { !accountTierHolder.isPremium }
     }
 }

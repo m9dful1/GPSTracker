@@ -299,6 +299,51 @@
             android:layout_height="wrap_content"
             android:text="@string/ad_privacy_options" />
 
+        <!-- Account tier section: a debug-build testing toggle, kept gone
+             in release where the persisted tier alone decides -->
+        <LinearLayout
+            android:id="@+id/account_tier_section"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/account_tier_title"
+                android:textAppearance="?attr/textAppearanceHeadline6"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="8dp" />
+
+            <RadioGroup
+                android:id="@+id/rg_account_tier"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <RadioButton
+                    android:id="@+id/rb_account_standard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/account_tier_standard" />
+
+                <RadioButton
+                    android:id="@+id/rb_account_premium"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/account_tier_premium" />
+            </RadioGroup>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/account_tier_debug_hint"
+                android:textAppearance="?attr/textAppearanceCaption" />
+        </LinearLayout>
+
         <!-- Buttons -->
         <LinearLayout
             android:layout_width="match_parent"

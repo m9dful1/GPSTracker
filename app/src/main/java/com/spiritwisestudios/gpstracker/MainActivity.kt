@@ -37,6 +37,7 @@ import com.google.android.gms.ads.AdView
 import com.spiritwisestudios.gpstracker.ads.AdsInitializer
 import com.spiritwisestudios.gpstracker.ads.ConsentManager
 import com.spiritwisestudios.gpstracker.ads.InterstitialAdManager
+import com.spiritwisestudios.gpstracker.data.repository.AccountTierHolder
 import com.spiritwisestudios.gpstracker.data.repository.MapProviderHolder
 import com.spiritwisestudios.gpstracker.data.service.FrameworkLocationClient
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
@@ -96,6 +97,9 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
     @Inject
     lateinit var mapProviderHolder: MapProviderHolder
+
+    @Inject
+    lateinit var accountTierHolder: AccountTierHolder
 
     // Use the viewModels() delegate to get the ViewModel from Hilt
     private val placesViewModel: PlacesViewModel by viewModels()
@@ -265,9 +269,11 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     /**
      * Load the bottom banner after the Mobile Ads SDK is up (deferred to
      * after the first frame) and the UMP consent flow has run — the ad
-     * request must reflect the user's consent answer.
+     * request must reflect the user's consent answer. Premium accounts
+     * skip all of it; a tier change re-lands here via activity recreation.
      */
     private fun setupAds() {
+        if (accountTierHolder.isPremium) return
         AdsInitializer.whenInitialized {
             if (isFinishing || isDestroyed) return@whenInitialized
             ConsentManager.gatherConsent(this) {

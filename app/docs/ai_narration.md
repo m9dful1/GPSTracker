@@ -20,6 +20,10 @@ fired a shot in battle…").
 3. Rebuild. Without the key the app builds and runs normally and narrates
    straight from Wikipedia — the rest of the app remains fully key-free.
 
+Gemini narration is also a **premium account** feature: standard accounts
+narrate from the parsed article even when a key is configured (see
+`account_tiers.md`; debug builds can switch tiers in Tour settings).
+
 ## How it works
 
 - `GeminiApiService` (`data/api/`) sends the place's **verified reference

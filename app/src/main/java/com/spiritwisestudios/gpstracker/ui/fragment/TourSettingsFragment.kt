@@ -19,7 +19,9 @@ import com.google.android.material.switchmaterial.SwitchMaterial
 import com.spiritwisestudios.gpstracker.BuildConfig
 import com.spiritwisestudios.gpstracker.R
 import com.spiritwisestudios.gpstracker.ads.ConsentManager
+import com.spiritwisestudios.gpstracker.data.repository.AccountTierHolder
 import com.spiritwisestudios.gpstracker.data.repository.MapProviderHolder
+import com.spiritwisestudios.gpstracker.domain.model.AccountTier
 import com.spiritwisestudios.gpstracker.domain.model.MapProvider
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
@@ -42,6 +44,9 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
 
     @Inject
     lateinit var mapProviderHolder: MapProviderHolder
+
+    @Inject
+    lateinit var accountTierHolder: AccountTierHolder
 
     // Category CheckBoxes
     private lateinit var cbHistorical: CheckBox
@@ -84,6 +89,11 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
 
     // Ads
     private lateinit var btnAdPrivacy: Button
+
+    // Account tier (debug testing toggle)
+    private lateinit var accountTierSection: View
+    private lateinit var rbAccountStandard: RadioButton
+    private lateinit var rbAccountPremium: RadioButton
 
     // Buttons
     private lateinit var btnCancel: Button
@@ -173,6 +183,20 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
 
         // Ads
         btnAdPrivacy = view.findViewById(R.id.btn_ad_privacy)
+
+        // Account tier: the toggle exists purely so both tiers can be
+        // tested; release builds keep it hidden and follow the persisted
+        // tier (Standard until an upgrade purchase sets Premium)
+        accountTierSection = view.findViewById(R.id.account_tier_section)
+        rbAccountStandard = view.findViewById(R.id.rb_account_standard)
+        rbAccountPremium = view.findViewById(R.id.rb_account_premium)
+        if (BuildConfig.DEBUG) {
+            accountTierSection.visibility = View.VISIBLE
+            when (accountTierHolder.current) {
+                AccountTier.PREMIUM -> rbAccountPremium.isChecked = true
+                AccountTier.STANDARD -> rbAccountStandard.isChecked = true
+            }
+        }
 
         // Buttons
         btnCancel = view.findViewById(R.id.btn_cancel)
@@ -358,7 +382,12 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
             )
         }
 
-        saveMapProvider()
+        // Both changes apply through one activity recreation ("or", not
+        // "||": each save must run)
+        val needsRecreate = saveMapProvider() or saveAccountTier()
+        if (needsRecreate) {
+            activity?.recreate()
+        }
     }
 
     /**
@@ -367,13 +396,28 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
      * The whole map stack — rendering, place discovery, search, routing —
      * follows the toggle.
      */
-    private fun saveMapProvider() {
+    private fun saveMapProvider(): Boolean {
         val selected = if (rbProviderGoogle.isChecked) MapProvider.GOOGLE else MapProvider.OPEN_STREET_MAP
-        if (selected == mapProviderHolder.current) return
+        if (selected == mapProviderHolder.current) return false
 
         mapProviderHolder.set(selected)
         viewModel.setMapProvider(selected) // ViewModel scope survives the recreate
-        activity?.recreate()
+        return true
+    }
+
+    /**
+     * Apply the debug testing toggle between the tiers. The recreation
+     * re-runs the ad setup, so the banner appears or disappears to match;
+     * narration routing reads the holder live and needs nothing else.
+     */
+    private fun saveAccountTier(): Boolean {
+        if (!BuildConfig.DEBUG) return false
+        val selected = if (rbAccountPremium.isChecked) AccountTier.PREMIUM else AccountTier.STANDARD
+        if (selected == accountTierHolder.current) return false
+
+        accountTierHolder.set(selected)
+        viewModel.setAccountTier(selected) // ViewModel scope survives the recreate
+        return true
     }
     
     /**

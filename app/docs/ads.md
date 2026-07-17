@@ -4,6 +4,9 @@ The ad setup mirrors Spiritwise's PopitBlast app: Google Mobile Ads with
 the UMP consent flow, initialized after the first rendered frame so app
 launch never waits on the ads SDK.
 
+Ads only serve on the **standard account tier** — premium accounts see
+none (see `account_tiers.md`).
+
 ## Where ads appear
 
 - **Banner** — at the foot of the bottom-card stack on the map screen.

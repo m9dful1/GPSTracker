@@ -20,6 +20,7 @@ import com.spiritwisestudios.gpstracker.data.api.WikipediaApiService
 import com.spiritwisestudios.gpstracker.data.db.AppDatabase
 import com.spiritwisestudios.gpstracker.data.db.dao.PointOfInterestDao
 import com.spiritwisestudios.gpstracker.data.db.dao.TourContentDao
+import com.spiritwisestudios.gpstracker.data.repository.AccountTierHolder
 import com.spiritwisestudios.gpstracker.data.repository.MapProviderHolder
 import com.spiritwisestudios.gpstracker.data.repository.PlacesRepositoryImpl
 import com.spiritwisestudios.gpstracker.data.repository.TourContentRepository
@@ -194,10 +195,12 @@ object AppModule {
         wikipediaApiService: WikipediaApiService,
         geminiApiService: GeminiApiService,
         tourContentDao: TourContentDao,
-        connectivityChecker: ConnectivityChecker
+        connectivityChecker: ConnectivityChecker,
+        accountTierHolder: AccountTierHolder
     ): ContentService {
         return ContentServiceImpl(
-            wikipediaApiService, geminiApiService, tourContentDao, connectivityChecker
+            wikipediaApiService, geminiApiService, tourContentDao, connectivityChecker,
+            accountTierHolder
         )
     }
 
