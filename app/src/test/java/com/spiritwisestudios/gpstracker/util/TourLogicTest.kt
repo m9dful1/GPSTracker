@@ -258,6 +258,91 @@ class TourLogicTest {
         assertFalse(TourLogic.narrationIsStale(TourLogic.RelativeDirection.BEHIND, null))
     }
 
+    // --- shouldPlayWayOfLife ---
+
+    private val quietLongEnough get() = now - TourLogic.QUIET_STRETCH_MS - 1L
+    private val drivingSpeed = 15f // m/s, ~54 km/h
+
+    @Test
+    fun `a long quiet driving stretch earns filler`() {
+        assertTrue(
+            TourLogic.shouldPlayWayOfLife(
+                nowMillis = now,
+                lastSpokenAtMillis = quietLongEnough,
+                lastWayOfLifeAtMillis = null,
+                speedMetersPerSecond = drivingSpeed,
+                narrationBusy = false
+            )
+        )
+    }
+
+    @Test
+    fun `recent speech postpones filler`() {
+        assertFalse(
+            TourLogic.shouldPlayWayOfLife(
+                nowMillis = now,
+                lastSpokenAtMillis = now - 60_000L,
+                lastWayOfLifeAtMillis = null,
+                speedMetersPerSecond = drivingSpeed,
+                narrationBusy = false
+            )
+        )
+    }
+
+    @Test
+    fun `sights always outrank filler`() {
+        assertFalse(
+            TourLogic.shouldPlayWayOfLife(
+                nowMillis = now,
+                lastSpokenAtMillis = quietLongEnough,
+                lastWayOfLifeAtMillis = null,
+                speedMetersPerSecond = drivingSpeed,
+                narrationBusy = true
+            )
+        )
+    }
+
+    @Test
+    fun `filler is a driving device, not a walking one`() {
+        assertFalse(
+            TourLogic.shouldPlayWayOfLife(
+                nowMillis = now,
+                lastSpokenAtMillis = quietLongEnough,
+                lastWayOfLifeAtMillis = null,
+                speedMetersPerSecond = 1.5f, // walking
+                narrationBusy = false
+            )
+        )
+    }
+
+    @Test
+    fun `one filler per cooldown window`() {
+        assertFalse(
+            TourLogic.shouldPlayWayOfLife(
+                nowMillis = now,
+                lastSpokenAtMillis = quietLongEnough,
+                lastWayOfLifeAtMillis = now - TourLogic.WAY_OF_LIFE_COOLDOWN_MS + 1L,
+                speedMetersPerSecond = drivingSpeed,
+                narrationBusy = false
+            )
+        )
+        assertTrue(
+            TourLogic.shouldPlayWayOfLife(
+                nowMillis = now,
+                lastSpokenAtMillis = quietLongEnough,
+                lastWayOfLifeAtMillis = now - TourLogic.WAY_OF_LIFE_COOLDOWN_MS,
+                speedMetersPerSecond = drivingSpeed,
+                narrationBusy = false
+            )
+        )
+    }
+
+    @Test
+    fun `way of life intro names the region and frames the quiet`() {
+        val intro = TourLogic.wayOfLifeIntro("Reno")
+        assertEquals("While the road is quiet, a little about Reno.", intro)
+    }
+
     // --- detailLevelFor ---
 
     @Test

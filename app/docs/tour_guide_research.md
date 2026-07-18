@@ -93,6 +93,20 @@ gaps.
    places along the way, including Fort Point." Guides close by paying off
    the best story, not just counting stops
    (`TourLogic.highlightWorthiness` picks it).
+9. **Way-of-life filler on long empty stretches.** Coach guides fill dead
+   highway with regional color — how people live here, what the area is
+   known for — rather than site facts without a site. After 4+ minutes of
+   silence while driving (`TourLogic.shouldPlayWayOfLife`), the guide
+   tells one segment about the nearest city or town: "While the road is
+   quiet, a little about Reno. …" The material is the region's own
+   Wikipedia article (found by title with a coordinate check, so "Reno"
+   resolves to the city and never a disambiguation page), routed through
+   the same tier split as place narration — premium gets a Gemini
+   way-of-life script, standard the parsed article — and cached under a
+   `region:` key. Restraint rules: sights always outrank filler, at most
+   one segment per 10 minutes, each region once per tour session, it
+   counts against the hourly narration cap, and it never plays at walking
+   speed (quiet on foot is just a walk in the park).
 
 ## Considered and deliberately not done
 
@@ -108,6 +122,3 @@ gaps.
 - **Callbacks between stops in AI scripts** — scripts are cached per
   place, and a cached "like the fort we passed earlier" would be wrong on
   any drive that didn't pass the fort.
-- **Way-of-life filler for long empty stretches** (coach guides fill dead
-  highway with regional color) — needs a separate geo-loose content pool;
-  the corridor preview at least sets the expectation of quiet.

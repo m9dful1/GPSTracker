@@ -1,6 +1,7 @@
 package com.spiritwisestudios.gpstracker.data.api
 
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
+import com.spiritwisestudios.gpstracker.util.GeoUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -99,6 +100,42 @@ class WikipediaApiService(private val httpClient: OkHttpClient) {
                 .filter { it.length > 2 && it !in setOf("the", "and", "for", "los", "las", "san") }
                 .toSet()
         }
+
+        /**
+         * Parse a by-title lookup (extract + coordinates) into an article,
+         * or null when the page is missing, empty, or not about a place
+         * near [near]. The coordinate check is the topic validator: "Reno"
+         * redirects to the city article (which carries coordinates by the
+         * listener), while a disambiguation page has no coordinates and a
+         * same-named town elsewhere fails the distance test.
+         */
+        internal fun parseTitleLookup(
+            json: String,
+            near: LatLng,
+            maxDistanceMeters: Float
+        ): WikiArticle? {
+            val pages = JSONObject(json).optJSONObject("query")?.optJSONObject("pages")
+                ?: return null
+            val firstPageKey = pages.keys().asSequence().firstOrNull() ?: return null
+            val page = pages.getJSONObject(firstPageKey)
+            if (page.has("missing")) return null
+
+            val pageId = page.optLong("pageid", -1L)
+            val extract = page.optString("extract", "").takeIf { it.isNotBlank() }
+            val coordinates = page.optJSONArray("coordinates")
+                ?.takeIf { it.length() > 0 }?.getJSONObject(0)
+            if (pageId <= 0 || extract == null || coordinates == null) return null
+
+            val articleLatLng = LatLng(coordinates.getDouble("lat"), coordinates.getDouble("lon"))
+            if (GeoUtils.distanceMeters(near, articleLatLng) > maxDistanceMeters) return null
+
+            return WikiArticle(
+                pageId = pageId,
+                title = page.optString("title", ""),
+                extract = extract,
+                url = "https://en.wikipedia.org/?curid=$pageId"
+            )
+        }
     }
 
     /**
@@ -141,6 +178,30 @@ class WikipediaApiService(private val httpClient: OkHttpClient) {
             extract = extract,
             url = "https://en.wikipedia.org/?curid=${best.pageId}"
         )
+    }
+
+    /**
+     * The article for a known name — a city or region rather than a POI,
+     * where geosearch would surface the buildings downtown instead of the
+     * city's own article. Redirects are followed ("Reno" lands on "Reno,
+     * Nevada") and the result must carry coordinates within
+     * [maxDistanceMeters] of [near], which filters out disambiguation
+     * pages and same-named places elsewhere.
+     */
+    suspend fun findArticleByTitle(
+        title: String,
+        near: LatLng,
+        maxDistanceMeters: Float = 50_000f
+    ): WikiArticle? = withContext(Dispatchers.IO) {
+        val url = "$API_BASE?action=query&prop=extracts%7Ccoordinates" +
+                "&exintro=1&explaintext=1&redirects=1" +
+                "&titles=${URLEncoder.encode(title, "UTF-8")}&format=json"
+        try {
+            parseTitleLookup(get(url), near, maxDistanceMeters)
+        } catch (e: Exception) {
+            Timber.e(e, "Wikipedia title lookup failed for $title")
+            null
+        }
     }
 
     /**

@@ -35,6 +35,26 @@ class GeminiApiServiceTest {
     }
 
     @Test
+    fun `way-of-life request carries the region and its own persona`() {
+        val body = JSONObject(
+            GeminiApiService.buildWayOfLifeRequestBody(
+                regionName = "Reno",
+                referenceNotes = "Reno is known as the Biggest Little City in the World."
+            )
+        )
+
+        val system = body.getJSONObject("system_instruction")
+            .getJSONArray("parts").getJSONObject(0).getString("text")
+        assertTrue(system.contains("tour guide"))
+        assertTrue(system.contains("quiet stretch"))
+
+        val prompt = body.getJSONArray("contents").getJSONObject(0)
+            .getJSONArray("parts").getJSONObject(0).getString("text")
+        assertTrue(prompt.contains("Reno"))
+        assertTrue(prompt.contains("Biggest Little City"))
+    }
+
+    @Test
     fun `request disables thinking for fast cheap scripts`() {
         val body = JSONObject(
             GeminiApiService.buildRequestBody("X", "OTHER", "notes", "")

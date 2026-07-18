@@ -205,6 +205,57 @@ object TourLogic {
      */
     const val INTER_NARRATION_PAUSE_MS = 8_000L
 
+    /**
+     * Silence long enough to fill with regional color. Under a few minutes
+     * is the deliberate quiet guides plan for; past that, listeners start
+     * wondering whether the app broke.
+     */
+    const val QUIET_STRETCH_MS = 4L * 60L * 1000L
+
+    /** At most one way-of-life segment per this window — rest is also planned. */
+    const val WAY_OF_LIFE_COOLDOWN_MS = 10L * 60L * 1000L
+
+    /**
+     * Way-of-life filler is a driving-tour device (long empty road); on
+     * foot, quiet is just a walk in the park.
+     */
+    const val WAY_OF_LIFE_MIN_SPEED_MPS = 5f
+
+    /**
+     * Whether a quiet stretch has earned a way-of-life segment: the guide
+     * has been silent long enough for the quiet to read as breakage, no
+     * real narration is playing or queued (sights always outrank filler),
+     * the listener is actually driving, and the last filler wasn't recent —
+     * coach guides fill long stretches, they don't chatter through every
+     * gap.
+     */
+    fun shouldPlayWayOfLife(
+        nowMillis: Long,
+        lastSpokenAtMillis: Long,
+        lastWayOfLifeAtMillis: Long?,
+        speedMetersPerSecond: Float,
+        narrationBusy: Boolean
+    ): Boolean {
+        if (narrationBusy) return false
+        if (speedMetersPerSecond < WAY_OF_LIFE_MIN_SPEED_MPS) return false
+        if (nowMillis - lastSpokenAtMillis < QUIET_STRETCH_MS) return false
+        if (lastWayOfLifeAtMillis != null &&
+            nowMillis - lastWayOfLifeAtMillis < WAY_OF_LIFE_COOLDOWN_MS
+        ) {
+            return false
+        }
+        return true
+    }
+
+    /**
+     * Spoken lead-in for a way-of-life segment. Frames the segment as
+     * filling quiet — so the listener knows this isn't a sight to look
+     * for — and names the region first, like every other narration.
+     */
+    fun wayOfLifeIntro(regionName: String): String {
+        return "While the road is quiet, a little about $regionName."
+    }
+
     /** Sliding window for the narrations-per-hour cap. */
     const val NARRATION_WINDOW_MS = 60L * 60L * 1000L
 

@@ -47,6 +47,25 @@ class GeminiApiService(
         referenceNotes: String,
         extraDetails: String = ""
     ): String? {
+        return requestScript(
+            buildRequestBody(placeName, category, referenceNotes, extraDetails),
+            label = placeName
+        )
+    }
+
+    /**
+     * A short spoken script of regional color — how people live around
+     * [regionName] — for the quiet stretches between sights, or null on
+     * the same failure modes as [writeTourScript].
+     */
+    suspend fun writeWayOfLifeScript(regionName: String, referenceNotes: String): String? {
+        return requestScript(
+            buildWayOfLifeRequestBody(regionName, referenceNotes),
+            label = regionName
+        )
+    }
+
+    private suspend fun requestScript(requestBody: String, label: String): String? {
         if (!isConfigured) return null
 
         return withContext(Dispatchers.IO) {
@@ -54,10 +73,7 @@ class GeminiApiService(
                 val request = Request.Builder()
                     .url("$baseUrl/v1beta/models/$MODEL:generateContent")
                     .header("x-goog-api-key", apiKey)
-                    .post(
-                        buildRequestBody(placeName, category, referenceNotes, extraDetails)
-                            .toRequestBody("application/json".toMediaType())
-                    )
+                    .post(requestBody.toRequestBody("application/json".toMediaType()))
                     .build()
 
                 httpClient.newCall(request).execute().use { response ->
@@ -69,7 +85,7 @@ class GeminiApiService(
                     polishScript(parseScript(body))
                 }
             } catch (e: Exception) {
-                Timber.w(e, "Gemini narration failed for $placeName")
+                Timber.w(e, "Gemini narration failed for $label")
                 null
             }
         }
@@ -119,6 +135,35 @@ class GeminiApiService(
         """.trimIndent()
 
         /**
+         * The guide's voice for the stretches between sights: no landmark
+         * to point at, so the trained fallback is "way of life" commentary —
+         * contemporary life, work, and character of the area — rather than
+         * site facts without a site.
+         */
+        internal val WAY_OF_LIFE_PROMPT = """
+            You are a charismatic local tour guide speaking over a car's audio
+            during a quiet stretch of road, between sights. The listener has
+            just heard an announcement like "While the road is quiet, a
+            little about Reno." — continue naturally from it, without
+            repeating the region's name in your first sentence and without
+            any greeting.
+
+            From the reference notes, sketch what life is like here: what the
+            area is known for, what people do, what shaped its character —
+            the color a local guide shares between sights. Write at most four
+            short, conversational sentences (under 85 words), one idea with
+            at most two supporting details. Prefer people, work, food, and
+            character over dates and statistics. If a detail is folklore
+            rather than fact, say so ("legend has it"). End with something
+            the listener can watch for out the window as they drive on.
+
+            Use only facts from the notes; when they are thin, say less rather
+            than inventing. Write for the ear: short sentences, no
+            parentheses, and plain spoken text only — no markdown, no lists,
+            no URLs, no stage directions.
+        """.trimIndent()
+
+        /**
          * The generateContent request JSON. Thinking is disabled — a
          * four-sentence script doesn't need it, and the listener is moving.
          */
@@ -138,15 +183,31 @@ class GeminiApiService(
                     appendLine(extraDetails.take(300))
                 }
             }
+            return requestJson(SYSTEM_PROMPT, prompt)
+        }
 
+        /** The request JSON for a between-sights regional-color script. */
+        internal fun buildWayOfLifeRequestBody(
+            regionName: String,
+            referenceNotes: String
+        ): String {
+            val prompt = buildString {
+                appendLine("Region: $regionName")
+                appendLine("Reference notes:")
+                appendLine(referenceNotes.take(MAX_NOTES_CHARS))
+            }
+            return requestJson(WAY_OF_LIFE_PROMPT, prompt)
+        }
+
+        private fun requestJson(systemPrompt: String, userPrompt: String): String {
             fun textParts(text: String) =
                 JSONObject().put("parts", JSONArray().put(JSONObject().put("text", text)))
 
             return JSONObject()
-                .put("system_instruction", textParts(SYSTEM_PROMPT))
+                .put("system_instruction", textParts(systemPrompt))
                 .put(
                     "contents",
-                    JSONArray().put(textParts(prompt).put("role", "user"))
+                    JSONArray().put(textParts(userPrompt).put("role", "user"))
                 )
                 .put(
                     "generationConfig",

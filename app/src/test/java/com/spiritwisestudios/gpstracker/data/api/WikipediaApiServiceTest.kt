@@ -1,5 +1,6 @@
 package com.spiritwisestudios.gpstracker.data.api
 
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -92,5 +93,67 @@ class WikipediaApiServiceTest {
             WikipediaApiService.GeoSearchResult(1, "History of San Francisco", 10.0)
         )
         assertNull(WikipediaApiService.pickBestArticle("Joe's Diner", candidates))
+    }
+
+    // --- parseTitleLookup ---
+
+    private val reno = LatLng(39.5296, -119.8138)
+
+    private fun titleLookupJson(
+        extract: String = "Reno is a city in Nevada known for its casinos.",
+        withCoordinates: Boolean = true,
+        lat: Double = 39.5296,
+        lon: Double = -119.8138
+    ): String {
+        val coordinates = if (withCoordinates) {
+            """, "coordinates": [ { "lat": $lat, "lon": $lon } ]"""
+        } else ""
+        return """
+            {
+              "query": {
+                "pages": {
+                  "100": { "pageid": 100, "title": "Reno, Nevada", "extract": "$extract"$coordinates }
+                }
+              }
+            }
+        """.trimIndent()
+    }
+
+    @Test
+    fun `title lookup parses an article near the expected spot`() {
+        val article = WikipediaApiService.parseTitleLookup(titleLookupJson(), reno, 50_000f)!!
+        assertEquals(100L, article.pageId)
+        assertEquals("Reno, Nevada", article.title)
+        assertTrue(article.extract.contains("casinos"))
+    }
+
+    @Test
+    fun `title lookup rejects pages without coordinates`() {
+        // Disambiguation pages have no coordinates — the wrong page for a
+        // region, however well the title matched
+        assertNull(
+            WikipediaApiService.parseTitleLookup(
+                titleLookupJson(withCoordinates = false), reno, 50_000f
+            )
+        )
+    }
+
+    @Test
+    fun `title lookup rejects a same-named place elsewhere`() {
+        // A "Reno" in Texas is not the Reno the listener is driving through
+        assertNull(
+            WikipediaApiService.parseTitleLookup(
+                titleLookupJson(lat = 33.6657, lon = -95.4633), reno, 50_000f
+            )
+        )
+    }
+
+    @Test
+    fun `title lookup rejects missing pages and blank extracts`() {
+        val missing = """{"query":{"pages":{"-1":{"title":"Nowhere","missing":""}}}}"""
+        assertNull(WikipediaApiService.parseTitleLookup(missing, reno, 50_000f))
+        assertNull(
+            WikipediaApiService.parseTitleLookup(titleLookupJson(extract = ""), reno, 50_000f)
+        )
     }
 }

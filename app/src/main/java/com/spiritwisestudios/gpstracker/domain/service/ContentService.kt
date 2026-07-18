@@ -1,5 +1,6 @@
 package com.spiritwisestudios.gpstracker.domain.service
 
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.TourContent
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
@@ -47,8 +48,23 @@ interface ContentService {
     )
     
     /**
+     * Regional "way of life" color about the area around the listener,
+     * used to fill long quiet stretches between sights.
+     *
+     * @param regionName Name of the city or town the listener is near
+     * @param location The region's coordinates, to validate the lookup
+     * @param userPreferences User preferences for content customization
+     * @return The content, or null when nothing documents the region
+     */
+    suspend fun getWayOfLifeContent(
+        regionName: String,
+        location: LatLng,
+        userPreferences: UserPreferences
+    ): TourContent?
+
+    /**
      * Queue content for delivery based on priority and relevance.
-     * 
+     *
      * @param content Tour content to queue
      * @param priority Priority level (higher values have higher priority)
      * @return True if successfully queued

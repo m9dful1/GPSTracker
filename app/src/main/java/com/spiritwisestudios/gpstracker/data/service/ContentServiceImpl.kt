@@ -5,6 +5,7 @@ import com.spiritwisestudios.gpstracker.data.api.WikipediaApiService
 import com.spiritwisestudios.gpstracker.data.db.dao.TourContentDao
 import com.spiritwisestudios.gpstracker.data.db.entity.TourContentEntity
 import com.spiritwisestudios.gpstracker.data.repository.AccountTierHolder
+import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.TourContent
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
@@ -45,6 +46,13 @@ class ContentServiceImpl(
 
         // Cap prefetching so a busy corridor doesn't fire dozens of requests
         private const val MAX_PREFETCH = 10
+
+        /**
+         * Cache key for regional way-of-life content. Rides the same table
+         * as POI narration (the poi_id column has no foreign key), with a
+         * prefix no real place id uses.
+         */
+        internal fun regionCacheId(regionName: String) = "region:$regionName"
 
         /**
          * Whether a cached item matches what the account tier would
@@ -186,6 +194,59 @@ class ContentServiceImpl(
             ),
             audioDuration = script.length / 20 // ~20 chars per second
         )
+    }
+
+    override suspend fun getWayOfLifeContent(
+        regionName: String,
+        location: LatLng,
+        userPreferences: UserPreferences
+    ): TourContent? {
+        val aiNarration = accountTierHolder.isPremium && geminiApiService.isConfigured
+        val cacheId = regionCacheId(regionName)
+
+        // Same cache discipline as place narration: serve unless the cached
+        // item was written for the other tier
+        tourContentDao.getContentForPoi(cacheId)?.let { cached ->
+            val content = cached.toDomainModel()
+            if (cacheMatchesTier(content.source, aiNarration)) {
+                Timber.d("Returning cached way-of-life content for $regionName")
+                return content.trimmedTo(userPreferences.contentDetailLevel)
+            }
+            Timber.d("Cached way-of-life content for $regionName is from the other tier; regenerating")
+        }
+
+        // The region's own article, found by title rather than geosearch —
+        // downtown geosearch surfaces the buildings, not the city
+        val article = wikipediaApiService.findArticleByTitle(regionName, location) ?: return null
+        val notes = cleanForSpeech(article.extract)
+        if (notes.isBlank()) return null
+
+        val script = if (aiNarration) {
+            geminiApiService.writeWayOfLifeScript(regionName, notes)
+        } else {
+            null
+        }
+        val body = script ?: notes
+
+        val content = TourContent(
+            id = UUID.randomUUID().toString(),
+            poiId = cacheId,
+            title = "About $regionName",
+            content = body,
+            summary = trimToDetailLevel(body, UserPreferences.DetailLevel.BRIEF),
+            source = if (script != null) {
+                TourContent.ContentSource.AI_GENERATED
+            } else {
+                TourContent.ContentSource.THIRD_PARTY
+            },
+            metadata = mapOf(
+                "sourceUrl" to article.url,
+                "wikipediaTitle" to article.title
+            ),
+            audioDuration = body.length / 20 // ~20 chars per second
+        )
+        tourContentDao.insertContent(TourContentEntity.fromDomainModel(content))
+        return content.trimmedTo(userPreferences.contentDetailLevel)
     }
 
     override suspend fun prefetchContent(
