@@ -646,9 +646,12 @@ class TourModeService : Service() {
     }
 
     /**
-     * Deliver the next piece of content in the queue.
+     * Deliver the next piece of content in the queue. [consecutiveErrors]
+     * counts speech failures in the current chain: a broken or muted engine
+     * fails instantly, and an unbounded retry would empty the queue in one
+     * pass, so the chain gives up and leaves the rest for the next trigger.
      */
-    private suspend fun deliverNextContent() {
+    private suspend fun deliverNextContent(consecutiveErrors: Int = 0) {
         try {
             isDelivering = true
             val content = contentService.getNextContent()
@@ -667,7 +670,8 @@ class TourModeService : Service() {
             val (direction, distanceMeters) = poiGeometry(poi)
             if (TourLogic.narrationIsStale(direction, distanceMeters)) {
                 Timber.d("Skipping ${content.title}: already ${distanceMeters?.toInt()}m behind")
-                deliverNextContent()
+                // A skip is not a failure; the error run carries over unchanged
+                deliverNextContent(consecutiveErrors)
                 return
             }
 
@@ -725,9 +729,22 @@ class TourModeService : Service() {
                     if (contentService.peekNextContent() != null) {
                         delay(TourLogic.INTER_NARRATION_PAUSE_MS)
                     }
-                    deliverNextContent()
+                    // A success ends the error run
+                    deliverNextContent(consecutiveErrors = 0)
                 }
-                AudioService.SpeakingStatus.ERROR -> deliverNextContent()
+                AudioService.SpeakingStatus.ERROR -> {
+                    val errorRun = consecutiveErrors + 1
+                    if (TourLogic.shouldKeepDeliveringAfterError(errorRun)) {
+                        deliverNextContent(errorRun)
+                    } else {
+                        // The engine isn't speaking at all. Leave the rest of
+                        // the queue for the next trigger rather than burning
+                        // it, and drop the card — nothing is being said.
+                        Timber.w("Giving up delivery after $errorRun speech failures in a row")
+                        _currentNarration.value = null
+                        isDelivering = false
+                    }
+                }
                 // Interrupted mid-utterance: whatever interrupted owns the
                 // audio now; the queue waits for the next trigger
                 else -> isDelivering = false

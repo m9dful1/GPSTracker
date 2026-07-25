@@ -258,6 +258,30 @@ class TourLogicTest {
         assertFalse(TourLogic.narrationIsStale(TourLogic.RelativeDirection.BEHIND, null))
     }
 
+    // --- shouldKeepDeliveringAfterError ---
+
+    @Test
+    fun `a single speech failure retries the next narration`() {
+        assertTrue(TourLogic.shouldKeepDeliveringAfterError(1))
+    }
+
+    @Test
+    fun `a run of failures short of the cap keeps trying`() {
+        assertTrue(
+            TourLogic.shouldKeepDeliveringAfterError(TourLogic.MAX_CONSECUTIVE_DELIVERY_ERRORS - 1)
+        )
+    }
+
+    @Test
+    fun `a dead engine stops the chain instead of draining the queue`() {
+        assertFalse(
+            TourLogic.shouldKeepDeliveringAfterError(TourLogic.MAX_CONSECUTIVE_DELIVERY_ERRORS)
+        )
+        assertFalse(
+            TourLogic.shouldKeepDeliveringAfterError(TourLogic.MAX_CONSECUTIVE_DELIVERY_ERRORS + 5)
+        )
+    }
+
     // --- shouldPlayWayOfLife ---
 
     private val quietLongEnough get() = now - TourLogic.QUIET_STRETCH_MS - 1L

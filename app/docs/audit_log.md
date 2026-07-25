@@ -14,17 +14,20 @@ One task per iteration, in list order unless a task is blocked:
    is testable.
 3. Verify: `./gradlew :app:assembleDebug :app:testDebugUnitTest` must pass,
    plus `:app:compileReleaseKotlin` when the change is not test-only.
-4. Mark it `DONE` with the real commit hash, append a **Progress log** entry
-   (what changed, what it fixed, anything the next task needs to know).
-5. Commit and push to `origin main`.
+4. Mark it `DONE`, append a **Progress log** entry (what changed, what it
+   fixed, anything the next task needs to know).
+5. Commit the code, the tests and the log entry together, then push to
+   `origin main`.
 
 When every task is `DONE`, run the audit again from scratch, append the
 findings as a new round, and keep going.
 
 Status values: `TODO` · `WIP` · `DONE` · `WONTFIX` (with a reason).
 
-Nothing is marked `DONE` before the work exists and the tests pass. Commit
-hashes are recorded after committing, never predicted.
+Each task is identified by its commit *subject*, not a hash: the log entry
+ships inside the commit it describes, so the hash doesn't exist yet when the
+entry is written. `git log --oneline --grep=<subject>` resolves it. Nothing is
+marked `DONE` before the work exists and the tests pass.
 
 ## Baseline at round 1
 
@@ -37,7 +40,7 @@ hashes are recorded after committing, never predicted.
 
 ## Tier 1 — breaks in normal use
 
-### A1 · Leaving the app silences a running tour — `TODO`
+### A1 · Leaving the app silences a running tour — `DONE`
 
 `PlacesViewModel.onCleared()` calls `audioService.shutdown()`
 (`PlacesViewModel.kt:325`), but `AudioService` is a `@Singleton`
@@ -296,3 +299,34 @@ anything the next task should know.
 Full read of the codebase produced tasks A1–A20 above. Baseline captured:
 264 tests green, `lintDebug` failing, no CI, 11 unpushed commits on `main`.
 No code changes in this entry.
+
+### A1 — "Keep the tour guide's voice alive when the app closes"
+
+`PlacesViewModel` no longer overrides `onCleared` to call
+`audioService.shutdown()`. The engine is a process-wide `@Singleton` shared
+with the foreground service, so the ViewModel's death is not the engine's
+death. The constraint now lives as a comment on the injected dependency
+rather than on the deleted override — that is where someone reaching for
+cleanup will read it, and it covers the fragments too, not just this one
+call site. `TourModeService.stopTourMode()` was already calling `stop()`
+rather than `shutdown()`, which is the right granularity: narration ends,
+the engine stays usable for the next tour.
+
+Also fixed the failure mode this bug exposed. `deliverNextContent` retried on
+`ERROR` with no limit, so an engine that fails instantly (dead, or audio focus
+denied by a phone call) drained the entire queue in one tight recursion and
+lost every story in it. It now carries a `consecutiveErrors` count and gives
+up after `TourLogic.MAX_CONSECUTIVE_DELIVERY_ERRORS` (3), leaving the rest
+queued for the next trigger and clearing the fact card since nothing is being
+spoken. A stale-skip deliberately does not count as a failure, and a success
+resets the run.
+
+Tests: 3 new cases in `TourLogicTest` for `shouldKeepDeliveringAfterError`
+(267 total, 0 failures); debug and release variants both compile. The
+one-line ViewModel change is not unit-testable without instrumentation — no
+test was written for it, and the comment on the dependency is the regression
+guard.
+
+**For later tasks:** the recursion is still the delivery mechanism. A8
+(serialize delivery) should turn it into a loop rather than adding a third
+guard on top of `isDelivering` and the error count.

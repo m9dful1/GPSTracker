@@ -34,6 +34,10 @@ class PlacesViewModel @Inject constructor(
     private val placesRepository: PlacesRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val tourContentRepository: TourContentRepository,
+    // Process-wide singleton, shared with the tour service, which keeps
+    // narrating after this ViewModel is gone. Speak, pause and stop freely,
+    // but never shutdown(): the engine outlives the screen, and tearing it
+    // down here silenced running tours the moment the user pressed Back.
     private val audioService: AudioService
 ) : ViewModel() {
 
@@ -319,11 +323,4 @@ class PlacesViewModel @Inject constructor(
         _error.value = null
     }
     
-    /**
-     * Clean up resources when ViewModel is cleared
-     */
-    override fun onCleared() {
-        super.onCleared()
-        audioService.shutdown()
-    }
 } 

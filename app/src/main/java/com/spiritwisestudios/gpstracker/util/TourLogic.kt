@@ -206,6 +206,23 @@ object TourLogic {
     const val INTER_NARRATION_PAUSE_MS = 8_000L
 
     /**
+     * How many consecutive speech failures the delivery chain tolerates
+     * before it stops pulling from the queue. A muted or broken engine fails
+     * the instant it is asked to speak, so retrying without a limit empties a
+     * full queue in one pass and loses every story in it. Giving up after a
+     * few leaves the rest queued for the next trigger to try.
+     */
+    const val MAX_CONSECUTIVE_DELIVERY_ERRORS = 3
+
+    /**
+     * Whether delivery should try the next queued narration after
+     * [consecutiveErrors] failures in a row (counting the one just seen).
+     */
+    fun shouldKeepDeliveringAfterError(consecutiveErrors: Int): Boolean {
+        return consecutiveErrors < MAX_CONSECUTIVE_DELIVERY_ERRORS
+    }
+
+    /**
      * Silence long enough to fill with regional color. Under a few minutes
      * is the deliberate quiet guides plan for; past that, listeners start
      * wondering whether the app broke.
