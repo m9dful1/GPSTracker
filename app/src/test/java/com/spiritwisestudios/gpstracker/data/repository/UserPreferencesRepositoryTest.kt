@@ -62,6 +62,30 @@ class UserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `an unrecognized detail level falls back instead of throwing`() {
+        // It used to be read with valueOf, which throws inside the flow's map
+        // and fails it for every collector — including the read that starts a
+        // tour, so one stale word ended the tour in an error state.
+        val stored = mutablePreferencesOf(
+            stringPreferencesKey("content_detail_level") to "EXHAUSTIVE"
+        )
+
+        val preferences = UserPreferencesRepository.toUserPreferences(stored)
+
+        assertEquals(UserPreferences.DetailLevel.MEDIUM, preferences.contentDetailLevel)
+    }
+
+    @Test
+    fun `every detail level survives a round trip through storage`() {
+        for (level in UserPreferences.DetailLevel.entries) {
+            val stored = mutablePreferencesOf(
+                stringPreferencesKey("content_detail_level") to level.name
+            )
+            assertEquals(level, UserPreferencesRepository.toUserPreferences(stored).contentDetailLevel)
+        }
+    }
+
+    @Test
     fun `stored settings are read back`() {
         val stored = mutablePreferencesOf(
             booleanPreferencesKey("audio_enabled") to false,

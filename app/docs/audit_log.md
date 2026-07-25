@@ -1092,7 +1092,7 @@ be a local write interrupted by a kill.
 and `.catch` on the exposed flows emitting defaults, so a bad file costs the
 user their settings rather than the app.
 
-### B2 · One unguarded enum read can break every preference — `TODO`
+### B2 · One unguarded enum read can break every preference — `DONE`
 
 `userPreferencesFlow` maps the stored detail level with
 `UserPreferences.DetailLevel.valueOf(it)` (`UserPreferencesRepository.kt:98`).
@@ -1239,3 +1239,21 @@ throw; it no longer can.
 Tests: 2 new cases in `UserPreferencesRepositoryTest` (384 total, 0 failures).
 The corruption handler itself is DataStore's, and exercising it needs a real
 file and an instrumented test.
+
+### B2 — "Read the detail level like every other stored enum"
+
+`UserPreferences.DetailLevel` gained a `fromStorage` companion function, copied
+from `AccountTier.fromStorage` and `MapProvider.fromStorage` line for line —
+`entries.firstOrNull { it.name == name } ?: MEDIUM`. The repository calls it
+instead of `valueOf`, so an unrecognized value costs the user their detail
+setting rather than failing `userPreferencesFlow` for every collector.
+
+**I checked the other three `valueOf` sites while here, and all were already
+guarded**: `parseCategories` and `TourContentEntity.toDomainModel` catch
+`IllegalArgumentException`, and `TourLogic.contentPriorityFor` wraps its category
+lookup the same way. The detail level was the only gap, which is the shape of
+this bug — a convention followed everywhere except once.
+
+Tests: 2 new cases (386 total, 0 failures) — an unrecognized value falling back
+to `MEDIUM`, and every real level surviving a round trip through storage, so the
+fallback can't quietly swallow a valid one.

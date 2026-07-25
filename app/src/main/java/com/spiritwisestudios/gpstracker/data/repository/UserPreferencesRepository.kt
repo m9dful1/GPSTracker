@@ -105,9 +105,9 @@ class UserPreferencesRepository @Inject constructor(
                 voiceLanguage = preferences[PreferencesKeys.VOICE_LANGUAGE] ?: "en-US",
                 autoPlayContent = preferences[PreferencesKeys.AUTO_PLAY_CONTENT] ?: true,
                 preferredCategories = parseCategories(preferences[PreferencesKeys.PREFERRED_CATEGORIES]),
-                contentDetailLevel = preferences[PreferencesKeys.CONTENT_DETAIL_LEVEL]?.let {
-                    UserPreferences.DetailLevel.valueOf(it)
-                } ?: UserPreferences.DetailLevel.MEDIUM,
+                contentDetailLevel = UserPreferences.DetailLevel.fromStorage(
+                    preferences[PreferencesKeys.CONTENT_DETAIL_LEVEL]
+                ),
                 notifyDistance = preferences[PreferencesKeys.NOTIFY_DISTANCE] ?: 200,
                 maxNotificationsPerHour = preferences[PreferencesKeys.MAX_NOTIFICATIONS_PER_HOUR] ?: 10,
                 prefetchContent = preferences[PreferencesKeys.PREFETCH_CONTENT] ?: true,

@@ -27,6 +27,17 @@ data class UserPreferences(
     enum class DetailLevel {
         BRIEF,
         MEDIUM,
-        DETAILED
+        DETAILED;
+
+        companion object {
+            /**
+             * Stored names from any app version fall back to MEDIUM. Reading
+             * this with `valueOf` threw inside the preferences flow, which
+             * fails it for every collector — including the read that starts a
+             * tour, so one unrecognized word ended the tour in an error.
+             */
+            fun fromStorage(name: String?): DetailLevel =
+                entries.firstOrNull { it.name == name } ?: MEDIUM
+        }
     }
 } 
