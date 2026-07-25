@@ -61,6 +61,14 @@ class TourContentRepository @Inject constructor(
     }
 
     /**
+     * Forget every cached story. The user's own control over the cache — the
+     * Tour Journal is history and survives it.
+     */
+    suspend fun clearCachedStories() {
+        contentService.clearStoryCache()
+    }
+
+    /**
      * Result class for content generation, kept for UI-layer compatibility.
      */
     sealed class ContentGenerationResult {

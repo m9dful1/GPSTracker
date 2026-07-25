@@ -100,6 +100,21 @@ interface ContentService {
      * been told. Ends the tour session.
      */
     fun clearContentQueue()
+
+    /**
+     * Drop cached stories that are too old or too many, per
+     * [com.spiritwisestudios.gpstracker.util.StoryCachePolicy]. The Tour
+     * Journal is untouched: it is the user's history, not a cache.
+     *
+     * @return How many cached stories were dropped.
+     */
+    suspend fun pruneStoryCache(): Int
+
+    /**
+     * Forget every cached story, so the next telling is fetched fresh. The
+     * user's own control over the cache; the journal survives it.
+     */
+    suspend fun clearStoryCache()
     
     /**
      * Result class for content generation operations.

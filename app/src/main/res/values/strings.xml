@@ -23,6 +23,12 @@
     <string name="voice_using_default">The language you chose isn\'t installed — the guide will use your device\'s default voice</string>
     <string name="voice_settings_unavailable">No text-to-speech settings screen to open</string>
 
+    <!-- Cached stories -->
+    <string name="story_cache_title">Cached stories</string>
+    <string name="story_cache_hint">The guide keeps the stories it has told so a place you pass again costs nothing. Old ones are dropped automatically. Your tour journal is separate and stays.</string>
+    <string name="clear_story_cache">Clear cached stories</string>
+    <string name="story_cache_cleared">Cached stories cleared</string>
+
     <!-- Narration fact card -->
     <string name="narration_source_wikipedia">From Wikipedia — read the full article</string>
     <string name="narration_tap_for_details">Tap for details</string>

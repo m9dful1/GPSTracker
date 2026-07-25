@@ -320,6 +320,22 @@ class PlacesViewModel @Inject constructor(
     }
 
     /**
+     * Forget every cached story, so the guide fetches fresh text next time.
+     * The Tour Journal is untouched — it is the user's own history.
+     */
+    fun clearCachedStories(onCleared: () -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                tourContentRepository.clearCachedStories()
+                onCleared()
+            } catch (e: Exception) {
+                Timber.e(e, "Error clearing cached stories")
+                _error.value = ErrorMessages.friendlyMessage(e, "clear the cached stories")
+            }
+        }
+    }
+
+    /**
      * Clear any current error
      */
     fun clearError() {

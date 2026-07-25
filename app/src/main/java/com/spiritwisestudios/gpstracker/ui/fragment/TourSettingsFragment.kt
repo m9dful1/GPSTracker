@@ -90,6 +90,9 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
     // Ads
     private lateinit var btnAdPrivacy: Button
 
+    // Cached stories
+    private lateinit var btnClearStoryCache: Button
+
     // Account tier (debug testing toggle)
     private lateinit var accountTierSection: View
     private lateinit var rbAccountStandard: RadioButton
@@ -184,6 +187,9 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         // Ads
         btnAdPrivacy = view.findViewById(R.id.btn_ad_privacy)
 
+        // Cached stories
+        btnClearStoryCache = view.findViewById(R.id.btn_clear_story_cache)
+
         // Account tier: the toggle exists purely so both tiers can be
         // tested; release builds keep it hidden and follow the persisted
         // tier (Standard until an upgrade purchase sets Premium)
@@ -261,6 +267,19 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
                     R.string.ad_privacy_unavailable
                 }
                 Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // Cached stories: the guide drops old ones on its own, but a user who
+        // wants fresh text (or the space back) shouldn't have to wait for that
+        btnClearStoryCache.setOnClickListener {
+            viewModel.clearCachedStories {
+                if (!isAdded) return@clearCachedStories
+                Toast.makeText(
+                    requireContext(),
+                    R.string.story_cache_cleared,
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
 

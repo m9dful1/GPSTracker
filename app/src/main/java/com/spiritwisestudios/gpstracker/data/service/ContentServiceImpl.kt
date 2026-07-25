@@ -11,6 +11,7 @@ import com.spiritwisestudios.gpstracker.domain.model.TourContent
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.domain.service.ConnectivityChecker
 import com.spiritwisestudios.gpstracker.domain.service.ContentService
+import com.spiritwisestudios.gpstracker.util.StoryCachePolicy
 import com.spiritwisestudios.gpstracker.util.TourLogic
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -301,6 +302,30 @@ class ContentServiceImpl(
     override fun clearContentQueue() {
         deliveryQueue.clear()
         Timber.d("Content queue cleared")
+    }
+
+    override suspend fun pruneStoryCache(): Int {
+        val aged = tourContentDao.deleteContentOlderThan(
+            StoryCachePolicy.cutoffMillis(System.currentTimeMillis())
+        )
+
+        // Even fresh stories are bounded: a long-running install that never
+        // idles long enough to age anything out shouldn't grow without limit
+        val trimmed = if (StoryCachePolicy.shouldTrim(tourContentDao.contentCount())) {
+            tourContentDao.trimToNewest(StoryCachePolicy.MAX_ENTRIES)
+        } else {
+            0
+        }
+
+        if (aged + trimmed > 0) {
+            Timber.d("Pruned story cache: $aged aged out, $trimmed over the cap")
+        }
+        return aged + trimmed
+    }
+
+    override suspend fun clearStoryCache() {
+        tourContentDao.deleteAllContent()
+        Timber.d("Story cache cleared")
     }
 
     private fun buildWikipediaContent(

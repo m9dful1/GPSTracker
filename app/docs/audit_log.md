@@ -224,7 +224,7 @@ is user-visible history — the one thing here that should not be disposable.
 **Fix:** real migrations from v2 onward, and backup rules that either exclude
 the DB or handle it deliberately.
 
-### A15 · Nothing ever evicts the caches — `TODO`
+### A15 · Nothing ever evicts the caches — `DONE`
 
 `tour_content` and `points_of_interest` grow without bound; `TourContentDao`
 has only `deleteAllContent()`, which nothing calls.
@@ -804,3 +804,36 @@ Tests: 4 new cases in `AppMigrationsTest` (362 total, 0 failures).
 needs `MigrationTestHelper` and an instrumented test, which this project has no
 harness for (`ExampleInstrumentedTest` is the only one, and A16 deletes it).
 The exported schema is the prerequisite for writing those, and it now exists.
+
+### A15 — "Let the story cache forget, and leave the journal alone"
+
+**Round 1 got the scope wrong, and this is the correction.** The task named two
+growing tables, but `points_of_interest` is not a cache: its only writers are
+`saveVisitedPlace` (the user marking a place, or writing a note on it) and
+`markPlaceNarrated`. Every row in it is either somewhere the guide narrated or
+somewhere the user annotated — it *is* the Tour Journal that A14 just went to
+some trouble to protect. Evicting from it would be deleting the user's history
+to save space. It grows with what the user has done, which is the correct
+behaviour, and nothing here touches it.
+
+That leaves `tour_content`, which is a real cache of regenerable text.
+`TourContentDao` gained three queries — a count, an age-based delete, and a
+keep-the-newest-N trim — and `StoryCachePolicy` holds the policy those apply:
+90 days, or 500 entries, whichever bites first. The age rule is the main one;
+the cap catches an install that drives daily for years and never idles long
+enough for anything to age out. `pruneStoryCache` runs once per tour start,
+which is the quietest moment the app has.
+
+All three are `DELETE` statements against the existing shape — no schema
+change, no version bump, no `DROP TABLE`, which is what A14 requires of
+anything touching this database from now on.
+
+**The settings control** is a "Clear cached stories" button in tour settings,
+with a caption saying in as many words that the tour journal is separate and
+stays. It routes through `PlacesViewModel.clearCachedStories` to the
+`deleteAllContent` query that existed all along and had no caller.
+
+Tests: 5 cases in `StoryCachePolicyTest` (367 total, 0 failures) over the
+cutoff, a story from today surviving it, one past the age falling before it, and
+the cap boundary in both directions. The queries themselves need Room and an
+instrumented test to exercise; the policy they enforce is what these pin.

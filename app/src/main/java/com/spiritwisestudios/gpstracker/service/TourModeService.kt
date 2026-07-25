@@ -297,6 +297,11 @@ class TourModeService : Service() {
                     }
                 }
 
+                // Take the chance to drop stories that have aged out or
+                // overflowed the cap. Once per tour is often enough, and a
+                // tour just starting is the quietest moment there is.
+                contentService.pruneStoryCache()
+
                 // Initialize audio service. A device with no usable voice
                 // still gets a tour — the journal, the map and the fact cards
                 // all work — but there is no point speaking into the void, and

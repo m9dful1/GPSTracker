@@ -344,6 +344,30 @@
                 android:textAppearance="?attr/textAppearanceCaption" />
         </LinearLayout>
 
+        <!-- Cached stories -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/story_cache_title"
+            android:textAppearance="?attr/textAppearanceHeadline6"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/story_cache_hint"
+            android:textAppearance="?attr/textAppearanceCaption"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_clear_story_cache"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/clear_story_cache" />
+
         <!-- Buttons -->
         <LinearLayout
             android:layout_width="match_parent"
