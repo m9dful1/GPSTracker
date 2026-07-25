@@ -78,7 +78,7 @@ again while parked.
 **Fix:** use the route destination as the arrival maneuver point and latch
 arrival so it is announced once per drive.
 
-### A4 · A revived service becomes a zombie — `TODO`
+### A4 · A revived service becomes a zombie — `DONE`
 
 `onStartCommand` returns `START_STICKY` (`TourModeService.kt:198`), so Android
 restarts the service with a **null intent**: `when (intent?.action)` matches
@@ -424,3 +424,41 @@ always 'true'" — `val dest = currentState.destination` is already smart-cast
 non-null by the guard at the top of `updateNavigation`. Confirmed pre-existing
 (same warning at the old line 241 with my changes stashed). It belongs with
 A18's warning sweep.
+
+### A4 — "Stop the tour service from haunting the notification shade"
+
+`onStartCommand` called `startForeground` first and worked out what to do
+second, so any command that turned out to be meaningless still left a "Tour
+Mode Active" notification behind. It now resolves the intent into a
+`util.TourCommand` *before* entering the foreground:
+
+- **A null intent is `RESUME`.** `START_STICKY` hands a killed service back
+  with no intent; `when (intent?.action)` matched nothing, so the service sat
+  in the foreground monitoring nothing at all. The tour's settings are
+  persisted, so it starts the tour again instead. Resuming re-plays the
+  spoken greeting — kept deliberately: after the system reclaims the app, "I
+  found 12 places nearby" is how the user learns the guide is back.
+- **Controls for a tour that has ended are `NONE`.** The A2 note called this
+  out: the fact card's play/pause and skip buttons `startService()`, which
+  *creates* the service if it is gone. A `NONE` command stops the instance
+  with `stopSelf(startId)` and returns `START_NOT_STICKY` without ever going
+  foreground. Nothing reaches the service that way through
+  `startForegroundService()` — only the geofence path uses that, and it never
+  resolves to `NONE` — so skipping `startForeground()` can't trip the
+  five-second rule.
+- **A stop request for an already-stopped tour is `NONE` too**, which ends the
+  instance rather than parking it in the foreground.
+
+A malformed geofence intent used to `return START_STICKY` after
+`startForeground` had already run — same zombie, third route. It now stops the
+service if no tour is behind it, and is ignored (rather than treated as a
+stop) if a tour is running: one bad intent shouldn't end a live tour.
+
+Tests: 9 cases in `TourCommandTest` (297 total, 0 failures), including the
+null-intent revival, playback controls with and without a tour, and an unknown
+action.
+
+**Still open, related:** if the tour dies into `Error` while geofences are
+registered, `stopTourMode()` returns early and they are never unregistered.
+Not touched here — it belongs with A7/A8's single-owner rework of the tour's
+state.

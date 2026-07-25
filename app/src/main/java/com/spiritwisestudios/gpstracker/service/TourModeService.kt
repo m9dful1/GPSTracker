@@ -25,6 +25,7 @@ import com.spiritwisestudios.gpstracker.domain.service.ContentService
 import com.spiritwisestudios.gpstracker.domain.service.LocationAwarenessService
 import com.spiritwisestudios.gpstracker.util.AppConstants
 import com.spiritwisestudios.gpstracker.util.GeoUtils
+import com.spiritwisestudios.gpstracker.util.TourCommand
 import com.spiritwisestudios.gpstracker.util.TourLogic
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -174,7 +175,20 @@ class TourModeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Timber.d("TourModeService started with intent: $intent")
+        val command = TourCommand.forAction(intent?.action, _serviceState.value.isRunning)
+        Timber.d("TourModeService start command: $command (intent=$intent)")
+
+        if (command == TourCommand.NONE) {
+            // A control for a tour that has already ended — the fact card's
+            // playback buttons can send one after the service is gone, and
+            // the intent itself creates this instance. Entering the
+            // foreground here is what left a "Tour Mode Active" notification
+            // with no tour behind it. Nothing arrives this way via
+            // startForegroundService(), so skipping startForeground() is safe.
+            Timber.d("Nothing to control; stopping instead of going foreground")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
 
         // Enter the foreground immediately: the geofence receiver starts this
         // service with startForegroundService(), which requires a prompt
@@ -184,16 +198,35 @@ class TourModeService : Service() {
             createNotification("Tour Mode Active", "Discovering interesting places nearby...", NOTIFICATION_CHANNEL_SERVICE)
         )
 
-        when (intent?.action) {
-            AppConstants.ACTION_START_TOUR_MODE -> {
+        when (command) {
+            // The system killed us mid-tour and handed the service back with
+            // no intent. The guide's settings are persisted, so pick the tour
+            // up again — the alternative is a foreground notification with
+            // nothing monitoring behind it, which is what this used to do.
+            TourCommand.RESUME -> {
+                Timber.i("Revived without an intent; resuming the tour")
                 startTourMode()
             }
-            AppConstants.ACTION_STOP_TOUR_MODE -> {
+            TourCommand.START -> {
+                startTourMode()
+            }
+            TourCommand.STOP -> {
                 stopTourMode()
             }
-            AppConstants.ACTION_PROCESS_GEOFENCE -> {
-                val action = intent.getStringExtra("action") ?: return START_STICKY
-                val geofenceIds = intent.getStringArrayListExtra("geofence_ids") ?: return START_STICKY
+            TourCommand.GEOFENCE -> {
+                val geofenceAction = intent?.getStringExtra("action")
+                val geofenceIds = intent?.getStringArrayListExtra("geofence_ids")
+                if (geofenceAction == null || geofenceIds == null) {
+                    // Malformed. Don't hold the foreground over it when there
+                    // is no tour behind it — and don't end a running tour
+                    // over one bad intent either.
+                    Timber.w("Geofence command without an action or ids")
+                    if (!_serviceState.value.isRunning) {
+                        stopSelf(startId)
+                        return START_NOT_STICKY
+                    }
+                    return START_STICKY
+                }
 
                 // If we were revived by a geofence event, make sure tour mode
                 // is running (it loads the saved settings itself)
@@ -202,13 +235,16 @@ class TourModeService : Service() {
                 }
 
                 // Process the geofence event
-                handleGeofenceEvent(action, geofenceIds)
+                handleGeofenceEvent(geofenceAction, geofenceIds)
             }
-            AppConstants.ACTION_PLAY_PAUSE -> {
+            TourCommand.PLAY_PAUSE -> {
                 handlePlayPauseAction()
             }
-            AppConstants.ACTION_NEXT_POI -> {
+            TourCommand.NEXT -> {
                 handleNextPoiAction()
+            }
+            TourCommand.NONE -> {
+                // Handled above
             }
         }
 
