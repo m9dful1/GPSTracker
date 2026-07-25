@@ -2,6 +2,7 @@ package com.spiritwisestudios.gpstracker.util
 
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RouteProgressTest {
@@ -102,6 +103,61 @@ class RouteProgressTest {
             -1,
             RouteProgress.nextInstructionIndex(routePoint(0), emptyList(), emptyList(), progressIndex = 0)
         )
+    }
+
+    // --- remainingRouteDistance ---
+
+    @Test
+    fun `the whole route is left at the start`() {
+        val whole = RouteProgress.remainingRouteDistance(route, 0)
+        val fromHalfway = RouteProgress.remainingRouteDistance(route, 5)
+
+        assertTrue("whole route measures something", whole > 0f)
+        // Ten even segments; five of them left from the midpoint
+        assertEquals(whole / 2f, fromHalfway, whole * 0.01f)
+    }
+
+    @Test
+    fun `nothing is left at the end of the route`() {
+        assertEquals(0f, RouteProgress.remainingRouteDistance(route, 10), 0f)
+        assertEquals(0f, RouteProgress.remainingRouteDistance(route, -1), 0f)
+        assertEquals(0f, RouteProgress.remainingRouteDistance(emptyList(), 0), 0f)
+    }
+
+    // --- remainingTimeMs ---
+
+    @Test
+    fun `time left comes from the planner's own duration`() {
+        // A 60 km motorway route the planner priced at 30 minutes should not
+        // be re-estimated at 30 mph; half way along, half the time is left.
+        val planned = 60_000f
+        val duration = 30L * 60_000L
+
+        assertEquals(duration / 2, RouteProgress.remainingTimeMs(30_000f, planned, duration))
+        assertEquals(duration / 4, RouteProgress.remainingTimeMs(15_000f, planned, duration))
+    }
+
+    @Test
+    fun `a full route still has its full duration`() {
+        val planned = 12_000f
+        val duration = 900_000L
+        assertEquals(duration, RouteProgress.remainingTimeMs(planned, planned, duration))
+    }
+
+    @Test
+    fun `arriving leaves no time`() {
+        assertEquals(0L, RouteProgress.remainingTimeMs(0f, 10_000f, 600_000L))
+        assertEquals(0L, RouteProgress.remainingTimeMs(-5f, 10_000f, 600_000L))
+    }
+
+    @Test
+    fun `without a planned duration it guesses from distance`() {
+        // The straight-line fallback: no route was priced, so the old
+        // hardcoded average is all there is.
+        val expected = (10_000f / RouteProgress.FALLBACK_SPEED_MPS * 1000).toLong()
+
+        assertEquals(expected, RouteProgress.remainingTimeMs(10_000f, 0f, 0L))
+        assertEquals(expected, RouteProgress.remainingTimeMs(10_000f, 10_000f, 0L))
     }
 
     @Test

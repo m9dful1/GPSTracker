@@ -202,7 +202,7 @@ crossing, and a network failure means no narration at all.
 **Fix:** carry the POI through (or keep an in-memory id→POI map) instead of a
 repository lookup.
 
-### A13 · ETA is a 30 mph constant after the first calculation — `TODO`
+### A13 · ETA is a 30 mph constant after the first calculation — `DONE`
 
 The routing API's own duration is used once (`NavigationServiceImpl.kt:97`)
 and then replaced by `remainingDistance / 13.4f` (`:286`, `:291`), so highway
@@ -739,3 +739,30 @@ every discovery), so the in-memory copy is otherwise as good as the stored one.
 
 Tests: 3 new cases in `PlacesRepositoryImplTest` (352 total, 0 failures) — the
 plain stamp, the notes surviving a re-narration, and the cooldown restarting.
+
+### A13 — "Trust the route planner's own ETA"
+
+The planner's duration was used for exactly one status emission and then
+discarded: every later fix recomputed the time left as
+`remainingDistance / 13.4f`, one hardcoded average, which reads a motorway
+drive as though it were a city block. `NavigationState` now keeps the route's
+planned distance and duration, and `RouteProgress.remainingTimeMs` scales the
+planned duration by the fraction of route still to drive. A recalculation
+replaces both with the new route's figures, so the estimate follows the roads
+the guide is actually on.
+
+The 13.4 m/s constant survives as `RouteProgress.FALLBACK_SPEED_MPS`, used only
+when there is no planned duration to scale — the straight-line fallback when
+the routing API failed. It is named and documented as a guess now, rather than
+being the answer.
+
+**Also changed, related:** the status's `distanceRemaining` was the crow-flies
+line to the destination while the ETA came from the road ahead, so the two
+numbers on the navigation card disagreed with each other. Both now come from
+`RouteProgress.remainingRouteDistance`. Arrival detection still uses the
+straight-line distance, which is the right measure for "am I there".
+
+Tests: 6 new cases in `RouteProgressTest` (358 total, 0 failures) — the route
+half driven, nothing left at the end, the planner's duration scaling by
+distance, a full route keeping its full duration, arriving at zero, and the
+fallback when no duration was priced.

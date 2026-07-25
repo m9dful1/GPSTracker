@@ -39,6 +39,53 @@ object RouteProgress {
     }
 
     /**
+     * Metres still to drive along [route], from [fromIndex] to the end.
+     * Ignores the short hop from the driver's actual position to that point.
+     */
+    fun remainingRouteDistance(route: List<LatLng>, fromIndex: Int): Float {
+        if (fromIndex < 0 || fromIndex >= route.size - 1) return 0f
+
+        var meters = 0f
+        for (i in fromIndex until route.size - 1) {
+            meters += GeoUtils.distanceMeters(route[i], route[i + 1])
+        }
+        return meters
+    }
+
+    /**
+     * How long is left, from the routing service's own figures scaled by the
+     * fraction of the route still to drive.
+     *
+     * The planner knows what the roads are: a motorway leg and a city block
+     * of the same length take very different times, and that knowledge is in
+     * the route's total duration. Recomputing from one hardcoded average
+     * speed threw it away and made every long drive read wrong.
+     *
+     * @param plannedDistanceMeters the route's total length as planned.
+     * @param plannedDurationMs the route's total duration as planned.
+     * @param fallbackSpeedMps used only when there is no planned duration to
+     *   scale — a straight-line guess, and marked as one.
+     */
+    fun remainingTimeMs(
+        remainingDistanceMeters: Float,
+        plannedDistanceMeters: Float,
+        plannedDurationMs: Long,
+        fallbackSpeedMps: Float = FALLBACK_SPEED_MPS
+    ): Long {
+        if (remainingDistanceMeters <= 0f) return 0L
+
+        if (plannedDistanceMeters > 0f && plannedDurationMs > 0L) {
+            val fraction = remainingDistanceMeters / plannedDistanceMeters
+            return (plannedDurationMs * fraction).toLong().coerceAtLeast(0L)
+        }
+
+        return (remainingDistanceMeters / fallbackSpeedMps * 1000).toLong()
+    }
+
+    /** About 30 mph — only for a route the planner never priced. */
+    const val FALLBACK_SPEED_MPS = 13.4f
+
+    /**
      * The maneuver to announce next: the nearest one still ahead on the route.
      * When nothing is ahead — off route, or past the last turn — the nearest
      * one overall, so guidance says something rather than nothing.

@@ -69,6 +69,14 @@ class NavigationServiceImpl @Inject constructor(
         val nextInstruction: NavigationService.NavigationInstruction? = null,
         val allInstructions: List<NavigationService.NavigationInstruction> = emptyList(),
         /**
+         * The route's own totals as the planner gave them. Scaling these by
+         * the fraction of route left keeps the ETA at real road speeds; the
+         * per-fix estimate used to throw them away and recompute from one
+         * hardcoded 30 mph average.
+         */
+        val plannedRouteDistanceMeters: Float = 0f,
+        val plannedRouteDurationMs: Long = 0L,
+        /**
          * Where each instruction's maneuver sits along [currentRoute], in the
          * same order as [allInstructions]. Computed once per route rather than
          * per instruction per fix — that was the whole cost of guidance.
@@ -119,6 +127,8 @@ class NavigationServiceImpl @Inject constructor(
                             routeResult.instructions,
                             routeResult.route
                         ),
+                        plannedRouteDistanceMeters = routeResult.distance,
+                        plannedRouteDurationMs = routeResult.duration,
                         nextInstruction = routeResult.instructions.firstOrNull()
                     )
                     
@@ -284,6 +294,8 @@ class NavigationServiceImpl @Inject constructor(
                                     routeResult.instructions,
                                     routeResult.route
                                 ),
+                                plannedRouteDistanceMeters = routeResult.distance,
+                                plannedRouteDurationMs = routeResult.duration,
                                 nextInstruction = routeResult.instructions.firstOrNull(),
                                 currentLocation = newLocation
                             )
@@ -307,44 +319,39 @@ class NavigationServiceImpl @Inject constructor(
             }
         }
 
-        // Update arrival time estimate based on remaining route, not just straight line
-        val remainingTime = if (closestRoutePointIndex >= 0 && closestRoutePointIndex < currentState.currentRoute.size - 1) {
-            // Calculate remaining distance along the route
-            var remainingDistance = 0f
-            for (i in closestRoutePointIndex until currentState.currentRoute.size - 1) {
-                remainingDistance += calculateDistance(
-                    currentState.currentRoute[i],
-                    currentState.currentRoute[i + 1]
-                )
-            }
-            
-            // Estimate time based on average speed
-            val avgSpeed = 13.4f // m/s, about 30 mph
-            (remainingDistance / avgSpeed * 1000).toLong() // milliseconds
-        } else {
-            // Fallback to straight-line calculation
-            if (newDistanceToDestination > 0) {
-                val avgSpeed = 13.4f // m/s, about 30 mph
-                (newDistanceToDestination / avgSpeed * 1000).toLong() // milliseconds
-            } else 0L
-        }
+        // What's left to drive: along the route while we're on it, and the
+        // straight line to the destination once past its last point
+        val remainingDistance = RouteProgress
+            .remainingRouteDistance(currentState.currentRoute, closestRoutePointIndex)
+            .takeIf { it > 0f }
+            ?: newDistanceToDestination
+
+        // And how long that takes at the speeds the planner assumed, rather
+        // than at one hardcoded average
+        val remainingTime = RouteProgress.remainingTimeMs(
+            remainingDistance,
+            currentState.plannedRouteDistanceMeters,
+            currentState.plannedRouteDurationMs
+        )
+
+        Timber.d("Navigation update: ${remainingDistance}m left along the route, closest point=$closestRoutePointIndex/${currentState.currentRoute.size}, time=${remainingTime}ms")
         
-        Timber.d("Navigation update: distance=${newDistanceToDestination}m, closest point=$closestRoutePointIndex/${currentState.currentRoute.size}, time=${remainingTime}ms")
-        
-        // Update navigation state
+        // Update navigation state. The distance shown is the one the ETA was
+        // derived from — the road ahead, not the crow-flies line to the
+        // destination, so the two numbers on the card agree with each other.
         navigationState.value = currentState.copy(
             currentLocation = newLocation,
-            distanceRemaining = newDistanceToDestination,
+            distanceRemaining = remainingDistance,
             eta = System.currentTimeMillis() + remainingTime,
             nextInstruction = nextInstruction
         )
-        
+
         // Emit updated status
         emitStatus(
             NavigationService.NavigationStatus(
                 isActive = true,
                 currentLocation = newLocation,
-                distanceRemaining = newDistanceToDestination,
+                distanceRemaining = remainingDistance,
                 timeRemaining = remainingTime,
                 nextInstruction = nextInstruction,
                 announcementTiming = announcementTiming,
