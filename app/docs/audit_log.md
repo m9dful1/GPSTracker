@@ -177,7 +177,7 @@ further after repeated failures.
 
 ## Tier 3 — performance
 
-### A11 · Route math runs on the main thread every fix — `TODO`
+### A11 · Route math runs on the main thread every fix — `DONE`
 
 `FrameworkLocationClient` delivers updates on `Looper.getMainLooper()`
 (`FrameworkLocationClient.kt:66`), and `updateNextInstructionBasedOnRoute`
@@ -671,3 +671,42 @@ catches only `IOException`, so a malformed body throws `JSONException` at the
 caller in each of them. Not fixed here: each has a different caller with
 different error handling, so it wants one deliberate sweep rather than a
 drive-by.
+
+### A11 — "Stop recomputing the whole route on every location fix"
+
+Both halves of the task, plus the duplication that made it hard to see.
+
+**The precompute.** `updateNextInstructionBasedOnRoute` asked "where is this
+maneuver on the route?" for every instruction on every fix — for a city route
+of ~2000 points and ~40 instructions, about 80,000 distance computations every
+five seconds, and 40 `Timber.d` lines with them. Maneuver points don't move, so
+`NavigationState` now carries `instructionRouteIndices`, computed once per route
+(initial calculation and each off-route recalculation) inside
+`withContext(Dispatchers.Default)`. Per-fix work drops to one pass over the
+route plus one distance per instruction — roughly 2,080 computations instead of
+80,000.
+
+**Off the main looper.** Fixes still arrive on the main looper (that is what
+`FrameworkLocationClient` offers, and its other callers want it), but the
+listener now hands the work to `serviceScope` — `Dispatchers.Default` — instead
+of doing it inline, so it no longer competes with the map's camera animation.
+A `Mutex` keeps fixes in arrival order, one at a time, since `updateNavigation`
+reads and then writes `navigationState`.
+
+**The geometry moved to `util/RouteProgress`**, which is where it became
+testable: `closestPointIndex`, `instructionRouteIndices` and
+`nextInstructionIndex` are pure and use `GeoUtils` rather than the private
+Haversine copy the service kept for itself. The old function's fallback — when
+no maneuver is ahead, name the nearest one rather than going blank — is
+preserved and now has a test, as does "a maneuver at the current point counts
+as behind us".
+
+Tests: 11 cases in `RouteProgressTest` (349 total, 0 failures) including the
+off-route match, the empty route, the fallback past the last turn, an unknown
+position, and a short index list not throwing.
+
+**Not done, and deliberately:** the one remaining per-fix pass over the route
+could be a windowed search around the last known progress index instead of a
+full scan. That is a real further win on long routes, but it needs care around
+loop routes that pass near themselves, and 2,000 float operations off the main
+thread every five seconds is no longer the bottleneck.

@@ -25,6 +25,10 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import com.spiritwisestudios.gpstracker.util.ArrivalLatch
 import com.spiritwisestudios.gpstracker.util.DistanceFormatter
+import com.spiritwisestudios.gpstracker.util.RouteProgress
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import android.graphics.Color
 
@@ -52,6 +56,9 @@ class NavigationServiceImpl @Inject constructor(
     // inside the arrival radius, and each one used to be another arrival
     private val arrivalLatch = ArrivalLatch()
     
+    // One location fix at a time through the route math, in arrival order
+    private val navigationUpdateMutex = Mutex()
+
     private data class NavigationState(
         val isActive: Boolean = false,
         val destination: LatLng? = null,
@@ -61,6 +68,12 @@ class NavigationServiceImpl @Inject constructor(
         val distanceRemaining: Float = 0f,
         val nextInstruction: NavigationService.NavigationInstruction? = null,
         val allInstructions: List<NavigationService.NavigationInstruction> = emptyList(),
+        /**
+         * Where each instruction's maneuver sits along [currentRoute], in the
+         * same order as [allInstructions]. Computed once per route rather than
+         * per instruction per fix — that was the whole cost of guidance.
+         */
+        val instructionRouteIndices: List<Int> = emptyList(),
         val currentLocation: LatLng? = null
     ) {
         companion object {
@@ -102,6 +115,10 @@ class NavigationServiceImpl @Inject constructor(
                         distanceRemaining = routeResult.distance,
                         eta = System.currentTimeMillis() + routeResult.duration,
                         allInstructions = routeResult.instructions,
+                        instructionRouteIndices = instructionRouteIndices(
+                            routeResult.instructions,
+                            routeResult.route
+                        ),
                         nextInstruction = routeResult.instructions.firstOrNull()
                     )
                     
@@ -128,6 +145,7 @@ class NavigationServiceImpl @Inject constructor(
                     // Fallback to straight-line calculation if API fails
                     currentRouteVersion++
                     navigationState.value = navigationState.value.copy(
+                        instructionRouteIndices = emptyList(),
                         currentRoute = listOf(currentLatLng, destination),
                         distanceRemaining = initialDistance,
                         eta = System.currentTimeMillis() + (initialDistance / 13.4f * 3600 * 1000).toLong() // Assuming average speed of 13.4 m/s (30 mph)
@@ -176,10 +194,17 @@ class NavigationServiceImpl @Inject constructor(
      */
     private fun setupLocationUpdates(emitStatus: (NavigationService.NavigationStatus) -> Unit) {
         try {
-            // Create location listener
+            // Create location listener. Fixes arrive on the main looper, but
+            // matching a position to a route is O(route points) — on the UI
+            // thread it competed with the map's own camera animation every
+            // few seconds. The mutex keeps fixes in order, one at a time.
             val listener = LocationListenerCompat { location ->
-                // Update with new location
-                updateNavigation(LatLng(location.latitude, location.longitude), emitStatus)
+                val fix = LatLng(location.latitude, location.longitude)
+                serviceScope.launch {
+                    navigationUpdateMutex.withLock {
+                        updateNavigation(fix, emitStatus)
+                    }
+                }
             }
             locationListener = listener
 
@@ -219,14 +244,15 @@ class NavigationServiceImpl @Inject constructor(
         val newDistanceToDestination = calculateDistance(newLocation, currentState.destination)
         
         // Find the closest point on our route to current location
-        val closestRoutePointIndex = findClosestPointOnRoute(newLocation, currentState.currentRoute)
+        val closestRoutePointIndex =
+            RouteProgress.closestPointIndex(newLocation, currentState.currentRoute)
         
         // Check if we need to update next instruction based on progress along the route
         val nextInstruction = updateNextInstructionBasedOnRoute(
-            newLocation, 
+            newLocation,
             currentState.allInstructions,
-            closestRoutePointIndex,
-            currentState.currentRoute
+            currentState.instructionRouteIndices,
+            closestRoutePointIndex
         )
         
         // Determine when to announce the instruction
@@ -254,6 +280,10 @@ class NavigationServiceImpl @Inject constructor(
                                 distanceRemaining = routeResult.distance,
                                 eta = System.currentTimeMillis() + routeResult.duration,
                                 allInstructions = routeResult.instructions,
+                                instructionRouteIndices = instructionRouteIndices(
+                                    routeResult.instructions,
+                                    routeResult.route
+                                ),
                                 nextInstruction = routeResult.instructions.firstOrNull(),
                                 currentLocation = newLocation
                             )
@@ -353,90 +383,39 @@ class NavigationServiceImpl @Inject constructor(
     }
     
     /**
-     * Find the index of the closest point on the route to the current location
+     * Where each instruction's maneuver sits along the route. Done once per
+     * route, off the caller's thread: it is O(instructions × route points),
+     * which is exactly the work that used to happen on every location fix.
      */
-    private fun findClosestPointOnRoute(location: LatLng, route: List<LatLng>): Int {
-        if (route.isEmpty()) return -1
-        
-        var closestPointIndex = -1
-        var minDistance = Float.MAX_VALUE
-        
-        for (i in route.indices) {
-            val distance = calculateDistance(location, route[i])
-            if (distance < minDistance) {
-                minDistance = distance
-                closestPointIndex = i
-            }
-        }
-        
-        return closestPointIndex
+    private suspend fun instructionRouteIndices(
+        instructions: List<NavigationService.NavigationInstruction>,
+        route: List<LatLng>
+    ): List<Int> = withContext(Dispatchers.Default) {
+        RouteProgress.instructionRouteIndices(instructions.map { it.maneuverPoint }, route)
     }
-    
+
     /**
      * Update the next instruction based on progress along the route
      */
     private fun updateNextInstructionBasedOnRoute(
         location: LatLng,
         instructions: List<NavigationService.NavigationInstruction>,
-        closestRoutePointIndex: Int,
-        route: List<LatLng>
+        instructionRouteIndices: List<Int>,
+        closestRoutePointIndex: Int
     ): NavigationService.NavigationInstruction? {
-        if (instructions.isEmpty() || closestRoutePointIndex < 0) return null
-        
-        // First find the next upcoming instruction we haven't passed yet
-        var nextInstructionIndex = -1
-        var closestDistance = Float.MAX_VALUE
-        
-        for (i in instructions.indices) {
-            val instruction = instructions[i]
-            
-            // Find the closest point on the route to this instruction
-            val instructionRouteIndex = findClosestPointOnRoute(instruction.maneuverPoint, route)
-            
-            // Only consider instructions ahead of us on the route
-            if (instructionRouteIndex > closestRoutePointIndex) {
-                val distance = calculateDistance(location, instruction.maneuverPoint)
-                
-                Timber.d("Instruction ${i}: ${instruction.description} at route point $instructionRouteIndex, distance=${distance}m")
-                
-                // If this instruction is ahead of us and closer than the current closest
-                if (distance < closestDistance) {
-                    closestDistance = distance
-                    nextInstructionIndex = i
-                }
-            }
-        }
-        
-        // If we found a next instruction
-        if (nextInstructionIndex >= 0) {
-            val nextInstruction = instructions[nextInstructionIndex]
-            
-            // Update the distance in the instruction to reflect actual distance
-            val updatedDistance = calculateDistance(location, nextInstruction.maneuverPoint)
-            
-            Timber.d("Selected instruction $nextInstructionIndex: ${nextInstruction.description}, distance=${updatedDistance}m")
-            
-            // Return an updated copy of the instruction with the correct distance
-            return nextInstruction.copy(distance = updatedDistance)
-        }
-        
-        // Fallback: if we can't find an instruction ahead (maybe we're off route),
-        // just return the closest instruction
-        return if (instructions.isNotEmpty()) {
-            var closestInstruction = instructions[0]
-            var minDistance = calculateDistance(location, closestInstruction.maneuverPoint)
-            
-            for (instruction in instructions) {
-                val distance = calculateDistance(location, instruction.maneuverPoint)
-                if (distance < minDistance) {
-                    minDistance = distance
-                    closestInstruction = instruction
-                }
-            }
-            
-            // Update distance in the instruction
-            closestInstruction.copy(distance = minDistance)
-        } else null
+        val next = RouteProgress.nextInstructionIndex(
+            location,
+            instructions.map { it.maneuverPoint },
+            instructionRouteIndices,
+            closestRoutePointIndex
+        )
+        if (next < 0) return null
+
+        val instruction = instructions[next]
+        // Report the real distance from here, not the distance the route
+        // planner gave for the leg
+        val updatedDistance = calculateDistance(location, instruction.maneuverPoint)
+        return instruction.copy(distance = updatedDistance)
     }
     
     /**
