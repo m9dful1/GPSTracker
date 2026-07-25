@@ -2,9 +2,12 @@ package com.spiritwisestudios.gpstracker.data.repository
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -17,13 +20,22 @@ import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.util.GoogleMapStyles
 import com.spiritwisestudios.gpstracker.util.MapStyles
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import timber.log.Timber
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
 // Extension property for Context to create the DataStore
 private val Context.userPreferencesDataStore: DataStore<Preferences> by preferencesDataStore(
-    name = "user_preferences"
+    name = "user_preferences",
+    // A file that can't be parsed is replaced with an empty one rather than
+    // thrown at the reader. Without this a corrupt file — a write killed
+    // mid-flight, or a restore from another device, which cloud backup now
+    // does — crashes every launch, because the application seeds its holders
+    // from a blocking read of this store before any activity exists.
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
 )
 
 /**
@@ -80,15 +92,13 @@ class UserPreferencesRepository @Inject constructor(
             }.toSet()
         }
 
-    }
-
-    /**
-     * Get the user preferences as a Flow.
-     */
-    val userPreferencesFlow: Flow<UserPreferences> = context.userPreferencesDataStore.data
-        .map { preferences ->
-            // Map the preferences to a UserPreferences object
-            UserPreferences(
+        /**
+         * Stored values → the settings the app runs on. Every field has a
+         * default, which is what lets an unreadable or empty file be answered
+         * with "defaults" instead of an exception.
+         */
+        internal fun toUserPreferences(preferences: Preferences): UserPreferences {
+            return UserPreferences(
                 audioEnabled = preferences[PreferencesKeys.AUDIO_ENABLED] ?: true,
                 voiceSpeed = preferences[PreferencesKeys.VOICE_SPEED] ?: 1.0f,
                 voicePitch = preferences[PreferencesKeys.VOICE_PITCH] ?: 1.0f,
@@ -104,12 +114,44 @@ class UserPreferencesRepository @Inject constructor(
                 useMobileData = preferences[PreferencesKeys.USE_MOBILE_DATA] ?: false
             )
         }
+    }
+
+    /**
+     * The stored preferences, or an empty set when the file can't be read.
+     *
+     * Losing the file costs the user their settings; letting the exception out
+     * costs them the app, since these flows are read during startup. Every
+     * value below has a default, so empty is a usable answer.
+     */
+    private val storedPreferences: Flow<Preferences> = context.userPreferencesDataStore.data
+        .catch { e ->
+            Timber.e(e, "Could not read stored preferences; falling back to defaults")
+            emit(emptyPreferences())
+        }
+
+    /**
+     * Apply an edit, absorbing a failed write. A preference that didn't save
+     * is worth a log line, not a crash in whichever coroutine set it.
+     */
+    private suspend fun save(transform: (MutablePreferences) -> Unit) {
+        try {
+            context.userPreferencesDataStore.edit(transform)
+        } catch (e: IOException) {
+            Timber.e(e, "Could not save preferences")
+        }
+    }
+
+    /**
+     * Get the user preferences as a Flow.
+     */
+    val userPreferencesFlow: Flow<UserPreferences> = storedPreferences
+        .map { preferences -> toUserPreferences(preferences) }
 
     /**
      * Update user preferences.
      */
     suspend fun updateUserPreferences(userPreferences: UserPreferences) {
-        context.userPreferencesDataStore.edit { preferences ->
+        save { preferences ->
             preferences[PreferencesKeys.AUDIO_ENABLED] = userPreferences.audioEnabled
             preferences[PreferencesKeys.VOICE_SPEED] = userPreferences.voiceSpeed
             preferences[PreferencesKeys.VOICE_PITCH] = userPreferences.voicePitch
@@ -130,13 +172,13 @@ class UserPreferencesRepository @Inject constructor(
      * survives app restarts. Stored values are sanitized so an unknown
      * value (e.g. from another app version) falls back to the default.
      */
-    val mapStyleFlow: Flow<Int> = context.userPreferencesDataStore.data
+    val mapStyleFlow: Flow<Int> = storedPreferences
         .map { preferences ->
             MapStyles.normalize(preferences[PreferencesKeys.MAP_STYLE])
         }
 
     suspend fun setMapStyle(style: Int) {
-        context.userPreferencesDataStore.edit { preferences ->
+        save { preferences ->
             preferences[PreferencesKeys.MAP_STYLE] = style
         }
     }
@@ -145,13 +187,13 @@ class UserPreferencesRepository @Inject constructor(
      * Which mapping stack to use — OpenStreetMap unless the user opted into
      * Google Maps. Reads sanitize unknown stored names back to the default.
      */
-    val mapProviderFlow: Flow<MapProvider> = context.userPreferencesDataStore.data
+    val mapProviderFlow: Flow<MapProvider> = storedPreferences
         .map { preferences ->
             MapProvider.fromStorage(preferences[PreferencesKeys.MAP_PROVIDER])
         }
 
     suspend fun setMapProvider(provider: MapProvider) {
-        context.userPreferencesDataStore.edit { preferences ->
+        save { preferences ->
             preferences[PreferencesKeys.MAP_PROVIDER] = provider.name
         }
     }
@@ -161,13 +203,13 @@ class UserPreferencesRepository @Inject constructor(
      * (no ads, Gemini narration). Unknown stored names fall back to
      * STANDARD.
      */
-    val accountTierFlow: Flow<AccountTier> = context.userPreferencesDataStore.data
+    val accountTierFlow: Flow<AccountTier> = storedPreferences
         .map { preferences ->
             AccountTier.fromStorage(preferences[PreferencesKeys.ACCOUNT_TIER])
         }
 
     suspend fun setAccountTier(tier: AccountTier) {
-        context.userPreferencesDataStore.edit { preferences ->
+        save { preferences ->
             preferences[PreferencesKeys.ACCOUNT_TIER] = tier.name
         }
     }
@@ -176,25 +218,25 @@ class UserPreferencesRepository @Inject constructor(
      * Layers-sheet style for the Google map, kept separately from the
      * OpenFreeMap style so switching providers forgets neither choice.
      */
-    val googleMapStyleFlow: Flow<Int> = context.userPreferencesDataStore.data
+    val googleMapStyleFlow: Flow<Int> = storedPreferences
         .map { preferences ->
             GoogleMapStyles.normalize(preferences[PreferencesKeys.GOOGLE_MAP_STYLE])
         }
 
     suspend fun setGoogleMapStyle(style: Int) {
-        context.userPreferencesDataStore.edit { preferences ->
+        save { preferences ->
             preferences[PreferencesKeys.GOOGLE_MAP_STYLE] = style
         }
     }
 
     /** The layers-sheet traffic overlay toggle (Google map only). */
-    val mapTrafficFlow: Flow<Boolean> = context.userPreferencesDataStore.data
+    val mapTrafficFlow: Flow<Boolean> = storedPreferences
         .map { preferences ->
             preferences[PreferencesKeys.MAP_TRAFFIC] ?: false
         }
 
     suspend fun setMapTraffic(enabled: Boolean) {
-        context.userPreferencesDataStore.edit { preferences ->
+        save { preferences ->
             preferences[PreferencesKeys.MAP_TRAFFIC] = enabled
         }
     }
@@ -209,7 +251,7 @@ class UserPreferencesRepository @Inject constructor(
         voiceLanguage: String? = null,
         autoPlayContent: Boolean? = null
     ) {
-        context.userPreferencesDataStore.edit { preferences ->
+        save { preferences ->
             audioEnabled?.let { preferences[PreferencesKeys.AUDIO_ENABLED] = it }
             voiceSpeed?.let { preferences[PreferencesKeys.VOICE_SPEED] = it }
             voicePitch?.let { preferences[PreferencesKeys.VOICE_PITCH] = it }

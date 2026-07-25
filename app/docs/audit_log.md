@@ -1073,7 +1073,7 @@ the *hard* parts became testable; the *big* parts stayed big.
 
 ## Tier 1 — breaks in normal use
 
-### B1 · A corrupt preferences file crashes every launch — `TODO`
+### B1 · A corrupt preferences file crashes every launch — `DONE`
 
 `preferencesDataStore(name = "user_preferences")` is created with no
 `corruptionHandler` (`UserPreferencesRepository.kt:25`) and none of its flows
@@ -1206,3 +1206,36 @@ timeout, catches broadly, validates its own output before speaking it),
 `ConsentManager` (defaults to non-personalized, every path calls back), and the
 four `!!` sites in the tree (three are the standard view-binding idiom, one is
 guarded by a `while (remaining.isNotEmpty())`).
+
+### B1 — "Survive a preferences file we can't read"
+
+Three layers, because the file is read before there is any UI to report to:
+
+- **The store replaces a corrupt file** rather than throwing at whoever opens
+  it: `corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }`.
+- **Reads absorb the rest.** All seven read flows now come off one
+  `storedPreferences` that `.catch`es and emits `emptyPreferences()`, so an
+  `IOException` costs the user their settings rather than the app.
+- **Writes absorb their own failures.** All seven `edit` sites go through a
+  `save` helper that logs an `IOException` instead of letting it out. They are
+  called from `viewModelScope` and the service's scope with no try/catch above
+  them, so a failed write was an uncaught exception looking for somewhere to
+  crash.
+
+The mapping from stored values to settings moved into
+`toUserPreferences(Preferences)` in the companion, which is what makes the
+claim testable: "nothing stored" now has a test asserting the result is the
+shipping defaults and, specifically, a tour that can still speak — an empty file
+answered with a *zeroed* configuration would be a silent guide, which is the
+failure this fix exists to avoid.
+
+**Left as it is, deliberately:** `GPSTrackerApplication` still seeds the map
+provider and account tier with `runBlocking { first() }`. It is a blocking
+main-thread read, but a load-bearing one — `MainActivity.onCreate` picks its map
+controller from the provider, so an activity that started before the answer
+arrived would build the wrong map. What made it dangerous was that it could
+throw; it no longer can.
+
+Tests: 2 new cases in `UserPreferencesRepositoryTest` (384 total, 0 failures).
+The corruption handler itself is DataStore's, and exercising it needs a real
+file and an instrumented test.
