@@ -67,7 +67,7 @@ disappears and the FAB reads "start tour".
 `isTourModeActive` from the bound service's `serviceState` instead of a local
 flag.
 
-### A3 · "You have arrived" repeats every 5 seconds — `TODO`
+### A3 · "You have arrived" repeats every 5 seconds — `DONE`
 
 The synthesized arrival instruction uses `maneuverPoint = newLocation`
 (`NavigationServiceImpl.kt:328`), and the voice-prompt dedup key contains the
@@ -384,3 +384,43 @@ itself needs instrumentation to test — none was written for it.
 buttons `startService()` with a playback action, which will *create* the
 service if it is gone — the same zombie path as a `START_STICKY` revival, from
 a different direction.
+
+### A3 — "Announce the destination once, not at every fix"
+
+Fixed at both ends, because arrival was reported wrongly *and* announced
+wrongly.
+
+In `NavigationServiceImpl`, the synthesized arrival instruction carried
+`maneuverPoint = newLocation` — the car's own drifting position — so every
+fix inside the radius looked like a brand new instruction. It now carries the
+route's destination, and the whole "have we arrived" question moved into
+`util/ArrivalLatch`, reset when a drive starts and stops. In `MainActivity`,
+the `lastAnnouncementKey` string became `util/VoicePromptGate`, which keeps
+the same one-key-per-maneuver rule and adds a separate arrival latch, so
+arrival is spoken once per drive no matter which instruction reports it —
+the route's own final instruction and the synthesized one are two different
+keys for the same event. The gate is also reset when a new destination is
+chosen, which the bare field never was: a second drive to a place already
+visited would have kept its stale key.
+
+The latch turned up a second bug on the way in. A Take a Tour loop drive ends
+where it began, so it starts *inside* the arrival radius — the old code
+announced arrival immediately and repeatedly at the trailhead, and a plain
+"once per drive" latch would have made that the only announcement, with
+nothing said on the actual return. `ArrivalLatch` therefore requires the car
+to have been outside the radius before an arrival counts. The cost is that a
+destination closer than 50 m is never announced; silence for a drive that
+short is the right trade.
+
+Tests: 8 cases in `ArrivalLatchTest` and 8 in `VoicePromptGateTest` (288
+total, 0 failures) covering the parked-car repeat, the loop drive at both
+ends, one maneuver announced twice at different distances, and arrival
+reported two different ways. Both new files are plain Kotlin in `util/`, which
+is what made this testable at all — the behaviour used to live in a private
+`Float` comparison inside a service that needs a `Context` and a `Geocoder`.
+
+**Noted, not fixed:** `NavigationServiceImpl.kt:247` warns "Condition is
+always 'true'" — `val dest = currentState.destination` is already smart-cast
+non-null by the guard at the top of `updateNavigation`. Confirmed pre-existing
+(same warning at the old line 241 with my changes stashed). It belongs with
+A18's warning sweep.

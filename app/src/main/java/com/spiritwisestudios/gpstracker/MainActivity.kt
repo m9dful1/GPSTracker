@@ -75,6 +75,7 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import com.spiritwisestudios.gpstracker.util.GeoUtils
 import com.spiritwisestudios.gpstracker.util.MarkerStyling
+import com.spiritwisestudios.gpstracker.util.VoicePromptGate
 import com.spiritwisestudios.gpstracker.databinding.ActivityMainBinding
 import java.util.ArrayDeque
 
@@ -144,8 +145,9 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     // Where we last searched for POIs; refetch after moving far enough
     private var lastPoiFetchCenter: LatLng? = null
 
-    // Dedup key so the same instruction isn't spoken on every location tick
-    private var lastAnnouncementKey: String? = null
+    // Keeps the same instruction from being spoken on every location tick,
+    // and arrival from being repeated at every fix in the parking lot
+    private val voicePromptGate = VoicePromptGate()
 
     // Tour mode service connection
     private var tourModeService: TourModeService? = null
@@ -1092,6 +1094,9 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     ) {
         try {
             navState = NavState.PREVIEW
+            // A new destination is a new drive: its turns and its arrival are
+            // all still unspoken, even if the last drive ended at one of them
+            voicePromptGate.reset()
             updateNavButtons()
             tvNavigationDestination.text = getString(R.string.route_to, displayName)
             tvNavigationInfo.text = getString(R.string.calculating_route)
@@ -1312,15 +1317,15 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         // maneuver+timing — status updates arrive every few seconds
         if (announcementTiming == NavigationService.AnnouncementTiming.IMMEDIATE ||
             announcementTiming == NavigationService.AnnouncementTiming.APPROACHING) {
+            val isArrival = instruction.type == NavigationService.InstructionType.ARRIVE
             val announcementKey = "${instruction.maneuverPoint}|${instruction.type}|$announcementTiming"
-            if (announcementKey != lastAnnouncementKey) {
-                lastAnnouncementKey = announcementKey
+            if (voicePromptGate.shouldSpeak(announcementKey, isArrival)) {
                 var voiceInstruction = formatInstructionForVoice(instruction, announcementTiming)
 
                 // On arrival, close the tour with a summary of the drive
                 // ("you heard about 7 places along the way"). Appended to the
                 // same utterance so it can't race the arrival prompt.
-                if (instruction.type == NavigationService.InstructionType.ARRIVE) {
+                if (isArrival) {
                     tourModeService?.consumeTripSummaryPhrase()?.let { summary ->
                         voiceInstruction += " $summary"
                     }
@@ -1417,7 +1422,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
         // Clear location history and announcement state
         locationHistory.clear()
-        lastAnnouncementKey = null
+        voicePromptGate.reset()
 
         // The end of a drive is the one natural ad break: bring the banner
         // back and show the preloaded interstitial (a no-op if none is

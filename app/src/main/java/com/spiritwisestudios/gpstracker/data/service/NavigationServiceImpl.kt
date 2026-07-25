@@ -23,6 +23,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import com.spiritwisestudios.gpstracker.util.ArrivalLatch
 import com.spiritwisestudios.gpstracker.util.DistanceFormatter
 import java.io.IOException
 import android.graphics.Color
@@ -46,6 +47,10 @@ class NavigationServiceImpl @Inject constructor(
     private var currentRouteVersion: Int = 0
     private val offRouteDistanceThresholdMeters: Float = 80f
     private val routeRecalculationCooldownMs: Long = 15_000L
+
+    // Arrival is reported once per drive: a parked car keeps producing fixes
+    // inside the arrival radius, and each one used to be another arrival
+    private val arrivalLatch = ArrivalLatch()
     
     private data class NavigationState(
         val isActive: Boolean = false,
@@ -67,12 +72,13 @@ class NavigationServiceImpl @Inject constructor(
     override fun startNavigation(destination: LatLng, waypoints: List<LatLng>): Flow<NavigationService.NavigationStatus> = callbackFlow {
         try {
             // Initial state update
+            arrivalLatch.reset()
             navigationState.value = NavigationState(
                 isActive = true,
                 destination = destination,
                 waypoints = waypoints
             )
-            
+
             // Get current location
             val location = getCurrentLocation()
             if (location != null) {
@@ -317,17 +323,20 @@ class NavigationServiceImpl @Inject constructor(
         )
         
         // Check if we've arrived at the destination
-        if (newDistanceToDestination < 50) { // Within 50 meters of destination
+        if (arrivalLatch.onDistanceToDestination(newDistanceToDestination)) {
             Timber.d("Arrived at destination")
-            
-            // Create arrival instruction
+
+            // Create arrival instruction. The maneuver point is the
+            // destination, not where the car happens to be standing: clients
+            // key voice prompts off it, and a point that drifts with every
+            // fix reads as a brand new instruction each time.
             val arrivalInstruction = NavigationService.NavigationInstruction(
                 type = NavigationService.InstructionType.ARRIVE,
                 distance = 0f,
                 description = "You have arrived at your destination",
-                maneuverPoint = newLocation
+                maneuverPoint = currentState.destination
             )
-            
+
             // Emit arrival status
             emitStatus(
                 NavigationService.NavigationStatus(
@@ -490,6 +499,7 @@ class NavigationServiceImpl @Inject constructor(
 
     override fun stopNavigation() {
         stopLocationUpdates()
+        arrivalLatch.reset()
         navigationState.value = NavigationState.Inactive
     }
 
