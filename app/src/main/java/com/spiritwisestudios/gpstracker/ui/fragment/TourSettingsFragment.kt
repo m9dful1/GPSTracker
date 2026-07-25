@@ -26,6 +26,7 @@ import com.spiritwisestudios.gpstracker.domain.model.MapProvider
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
+import java.util.Locale
 import com.spiritwisestudios.gpstracker.util.DistanceFormatter
 import com.spiritwisestudios.gpstracker.util.TourLogic
 import dagger.hilt.android.AndroidEntryPoint
@@ -214,7 +215,7 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         seekBarVoiceSpeed.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 val speed = progressToSpeed(progress)
-                tvVoiceSpeedValue.text = String.format("%.1fx", speed)
+                tvVoiceSpeedValue.text = String.format(Locale.getDefault(), "%.1fx", speed)
             }
             
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -226,7 +227,7 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         seekBarVoicePitch.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 val pitch = progressToPitch(progress)
-                tvVoicePitchValue.text = String.format("%.1fx", pitch)
+                tvVoicePitchValue.text = String.format(Locale.getDefault(), "%.1fx", pitch)
             }
             
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -327,12 +328,12 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         // Convert voice speed to progress (0.5 to 2.0 -> 0 to 20)
         val speedProgress = speedToProgress(preferences.voiceSpeed)
         seekBarVoiceSpeed.progress = speedProgress
-        tvVoiceSpeedValue.text = String.format("%.1fx", preferences.voiceSpeed)
+        tvVoiceSpeedValue.text = String.format(Locale.getDefault(), "%.1fx", preferences.voiceSpeed)
         
         // Convert voice pitch to progress (0.5 to 2.0 -> 0 to 20)
         val pitchProgress = pitchToProgress(preferences.voicePitch)
         seekBarVoicePitch.progress = pitchProgress
-        tvVoicePitchValue.text = String.format("%.1fx", preferences.voicePitch)
+        tvVoicePitchValue.text = String.format(Locale.getDefault(), "%.1fx", preferences.voicePitch)
         
         switchAutoPlay.isChecked = preferences.autoPlayContent
         

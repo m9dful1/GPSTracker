@@ -253,7 +253,7 @@ is always null (`NavigationServiceImpl.kt:538`). Nothing calls it.
 **Fix:** delete it, or make it correct with `suspendCancellableCoroutine`
 before something depends on it.
 
-### A18 · Release readiness — `TODO`
+### A18 · Release readiness — `DONE`
 
 No `signingConfig`; `isMinifyEnabled = false`; `versionCode = 1` /
 `versionName = "1.0"`; `lintDebug` fails on `MissingPermission`
@@ -897,3 +897,59 @@ belongs.
 
 No new tests: removal, and the tally holds at 366 with debug and release both
 compiling.
+
+### A18 — "Make the build tell the truth about itself"
+
+**`lintDebug` passes.** It had failed since the baseline. The
+`MissingPermission` error was `LocationManagerCompat.removeUpdates` inheriting
+the request side's permission annotation; it is suppressed with the reason
+written down — handing updates *up* can't expose a location, and it has to work
+when the permission has just been revoked, which is exactly when it matters.
+
+**CI exists**: `.github/workflows/build.yml` runs `assembleDebug`,
+`testDebugUnitTest` and `lintDebug` on every push and pull request — the same
+three commands each task in this log verifies with — then `assembleRelease`
+separately, because R8 runs for no other variant and a missing keep rule can't
+fail any of the first three. No secrets: every API key is optional and the build
+falls back to keyless services and Google's test ad units, so a fresh clone
+passes as-is. Reports upload on failure.
+
+**Release shrinking is on**, and the keep rules are the interesting part. R8
+renames what it likes, and three kinds of name in this app are *stored data*:
+
+- `LatLng` is written into Room columns as Gson JSON, so its field names are
+  the on-disk format. Kept whole — the fields are only ever touched
+  reflectively, so shrinking would otherwise be free to drop them.
+- Enum constants are persisted by name (`ContentSource` and `DetailLevel` in
+  Room, `Category` and `AccountTier` in DataStore) and read back with `valueOf`.
+- Gson needs `Signature` to resolve the converter's anonymous `TypeToken`.
+
+Verified against R8's own output rather than by assertion: `seeds.txt` lists
+`LatLng.latitude`/`longitude` and all four enums with their constants, and
+`mapping.txt` shows `LatLng` unrenamed. Obfuscating any of them would have
+produced a release-only failure on a device that had previously run a debug
+build — the worst possible shape for a bug. Line numbers are kept for readable
+crash reports. The release APK is 51.9 MB against the debug 61.2 MB.
+
+**Signing** reads `RELEASE_STORE_FILE` and friends from `local.properties` or
+the environment, the same pattern the API keys already use, and the config only
+exists when the keystore does. A clone without it still builds a release APK,
+just unsigned — which is all CI could do anyway.
+
+**`versionCode = 1` is left alone deliberately.** For an app that has never
+shipped, version 1 / 1.0 is the correct answer, and inventing a higher number
+would say something untrue. What was missing is the rule, which now lives here:
+bump `versionCode` on every store upload, `versionName` when the release is
+worth a name.
+
+**Not done: the warning sweep.** 78 warnings remain, and the two biggest groups
+are deliberate deferrals rather than oversights — 22 `UseTomlInstead` (hardcoded
+dependency coordinates that belong in the version catalog; mechanical, and A16
+already moved the two that mattered) and 22 `GradleDependency` plus 11
+`NewerVersionAvailable` (upgrades, which want reading release notes rather than
+bumping numbers in a loop). The 8 `DefaultLocale` warnings *were* fixed — four
+`String.format` calls in the settings sheet, the only warnings in the list that
+were a correctness question rather than housekeeping.
+
+Tests: unchanged at 366, 0 failures. `lintDebug` green for the first time since
+round 1, and `assembleRelease` builds through R8.

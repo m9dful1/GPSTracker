@@ -70,6 +70,15 @@ class FrameworkLocationClient(context: Context) {
         }
     }
 
+    /**
+     * Stop delivering to [listener].
+     *
+     * Lint asks for a location permission here because the compat wrapper
+     * shares its annotation with the request side. Giving updates *up* can't
+     * expose a location, and this has to work even when the permission has
+     * just been revoked — which is precisely when it matters most.
+     */
+    @SuppressLint("MissingPermission")
     fun removeUpdates(listener: LocationListenerCompat) {
         LocationManagerCompat.removeUpdates(locationManager, listener)
     }

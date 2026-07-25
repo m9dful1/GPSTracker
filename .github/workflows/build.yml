@@ -1,0 +1,57 @@
+name: build
+
+# Everything the audit log's per-task verification runs locally, on every push
+# and pull request. No secrets: the API keys are all optional, and the build
+# falls back to keyless OpenStreetMap services and Google's test ad units, so a
+# fresh clone builds and passes as-is.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Assemble, test and lint
+        run: ./gradlew --no-daemon :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+
+      # R8 only runs for release, so a missing keep rule can't show up in any
+      # of the above. The APK comes out unsigned here — CI has no keystore,
+      # and building it is the point rather than shipping it.
+      - name: Assemble release (R8)
+        run: ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          if-no-files-found: ignore
+          path: |
+            app/build/reports/tests/**
+            app/build/test-results/**
+            app/build/reports/lint-results-*.html
+            app/build/reports/lint-results-*.txt

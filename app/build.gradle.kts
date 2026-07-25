@@ -34,6 +34,16 @@ val admobBannerAdUnitId: String =
 val admobInterstitialAdUnitId: String =
     localProperties.getProperty("ADMOB_INTERSTITIAL_AD_UNIT_ID") ?: testInterstitialAdUnitId
 
+// Release signing, from local.properties or the environment — never committed.
+// A clone without the keystore still builds a release APK; it just comes out
+// unsigned, which is what CI wants and the only thing it could do anyway.
+fun signingProperty(name: String): String? =
+    localProperties.getProperty(name) ?: System.getenv(name)
+
+val releaseKeystore: File? = signingProperty("RELEASE_STORE_FILE")
+    ?.let { rootProject.file(it) }
+    ?.takeIf { it.exists() }
+
 android {
     namespace = "com.spiritwisestudios.gpstracker"
     compileSdk = 35
@@ -53,9 +63,28 @@ android {
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
     }
 
+    signingConfigs {
+        // Only configured when a keystore is actually available; see
+        // signingProperty above for where the values come from.
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = signingProperty("RELEASE_STORE_PASSWORD")
+                keyAlias = signingProperty("RELEASE_KEY_ALIAS")
+                keyPassword = signingProperty("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
+
+            // R8 on, with the keep rules in proguard-rules.pro for the names
+            // that are part of stored data. Resource shrinking is safe here:
+            // nothing looks up a resource by name at runtime.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
