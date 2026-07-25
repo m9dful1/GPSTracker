@@ -120,7 +120,7 @@ fix, so per-POI rate limiting has to land in the same change.
 
 ## Tier 2 — concurrency and silent failure
 
-### A7 · `narrationTimes` is unsynchronized shared state — `TODO`
+### A7 · `narrationTimes` is unsynchronized shared state — `DONE`
 
 Declared as a plain `mutableListOf` (`TourModeService.kt:130`), pruned with
 `removeAt(0)` and appended in `generateAndQueueContent` (`:602`, `:633`) —
@@ -133,7 +133,7 @@ catch swallows it and silently drops a narration.
 **Fix:** confine narration bookkeeping to one owner (a `Mutex`, or route all
 delivery decisions through a single coroutine).
 
-### A8 · `isDelivering` is checked and set non-atomically — `TODO`
+### A8 · `isDelivering` is checked and set non-atomically — `DONE`
 
 `if (!audioService.isSpeaking() && !isDelivering) deliverNextContent()`
 (`TourModeService.kt:637`) lets two concurrent coroutines both pass.
@@ -532,3 +532,60 @@ rather than merely without crashing.
 Tests: 9 cases in `ProximityAlertGateTest` (313 total, 0 failures) covering the
 per-fix repeat, state progression, three places not hiding each other, the
 repeat window, leaving and re-entering the radius, unregister, and reset.
+
+### A7 + A8 — "Give the tour's state one owner"
+
+Done as one change, as both tasks said to: they are the same problem, and the
+four fields wanted one owner rather than four locks.
+
+`util/TourSession` now holds the hourly narration cap, the regions covered,
+the delivery flag and the skip request, each behind one lock, with the rules
+still in `TourLogic`. What that fixes:
+
+- **The cap is claimed, not checked-then-taken.** `tryReserveNarration` prunes,
+  counts and records in one step, so two places coming into range on the same
+  location fix can no longer both slip past a cap of one. The old advisory
+  check survives as `canNarrate`, used before the content fetch purely to skip
+  work the cap would waste; the claim happens at the point of queueing. A
+  duplicate the queue turns away hands its slot back (`releaseNarration`) —
+  nothing was said, so nothing should count. This also retires A6's
+  `CopyOnWriteArrayList` stopgap: the list is a plain one again, because
+  nothing outside the lock touches it.
+- **Delivery is claimed with a token.** `beginDelivery()` returns null if a
+  loop already owns delivery, so the two triggers can't both start telling
+  stories. The token matters for the second half of A8: an interrupted loop
+  used to clear the flag underneath a newer one, so `endDelivery(token)`
+  releases only if that loop is still the current generation — `reset()` bumps
+  the generation, orphaning anything still unwinding.
+- **The delivery recursion became a loop**, which A1's entry asked for. The
+  error run is a local variable now rather than a parameter threaded through
+  recursive calls, and the `finally` releases delivery on every exit including
+  cancellation.
+
+**"Next" needed rethinking.** It used to stop the audio and start a second
+delivery, which is precisely how two loops ended up fighting. Stopping audio
+is indistinguishable from anything else taking the floor, so the request is
+now explicit: `requestSkip()`, then the running loop reads the interruption as
+"move on" and continues. If nothing was delivering, the launched call starts a
+loop instead — same outcome either way. A pending skip is cleared as each
+narration begins, so it only ever speaks for the story it interrupted; left
+set, a later unrelated flush (an on-demand replay from the place details
+sheet) would have read as a skip and pulled the tour forward.
+
+Tests: 15 cases in `TourSessionTest` (328 total, 0 failures), including the
+cap-of-one under five concurrent claims, the released slot, the superseded
+loop that must not release the flag under a new one, and the skip that only
+speaks for its own story.
+
+**Left where it is, deliberately:** `lastSpokenAt` (single `@Volatile` writer),
+`lastWayOfLifeAt` and `currentPoi` (one coroutine each), and the trip
+counters, which the delivery loop now owns exclusively — one loop at a time is
+what made them safe. `consumeTripSummaryPhrase()` still reads them from the
+binder thread; an `Int` read of a counter is benign, and moving all of it in
+would have doubled the diff for no safety gained.
+
+**Still open, unchanged:** the `Error`-state geofence leak noted under A4.
+`stopTourMode()` returns early when the state is `Error`, so registered
+geofences are never unregistered. It survived this rework because it is a
+state-machine question, not a shared-state one — it belongs with A19's tests
+around the service.

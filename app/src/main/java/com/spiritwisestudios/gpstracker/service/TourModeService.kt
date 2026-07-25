@@ -27,6 +27,7 @@ import com.spiritwisestudios.gpstracker.util.AppConstants
 import com.spiritwisestudios.gpstracker.util.GeoUtils
 import com.spiritwisestudios.gpstracker.util.TourCommand
 import com.spiritwisestudios.gpstracker.util.TourLogic
+import com.spiritwisestudios.gpstracker.util.TourSession
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,7 +44,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import timber.log.Timber
-import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
 
 /**
@@ -115,31 +115,19 @@ class TourModeService : Service() {
     private var tripHighlightName: String? = null
     private var tripHighlightScore = -1
 
-    // True from the moment a narration is pulled off the queue until the
-    // queue drains, including the scheduled pause between narrations —
-    // isSpeaking() alone would let a geofence event double-deliver during
-    // that pause
-    @Volatile
-    private var isDelivering = false
+    // The tour's own bookkeeping: the hourly narration cap, the regions
+    // already covered, and who is delivering. Every one of those is touched
+    // from geofence transitions, proximity alerts, the quiet-stretch watcher
+    // and the notification's buttons at once, so it lives behind one owner
+    // rather than as separate fields with separate races.
+    private val session = TourSession()
 
     // Way-of-life filler state: when the guide last said anything, when the
-    // last filler played, which regions were already covered this session,
-    // and the watcher job itself
+    // last filler played, and the watcher job itself
     private var wayOfLifeJob: Job? = null
     @Volatile
     private var lastSpokenAt = 0L
     private var lastWayOfLifeAt: Long? = null
-    private val narratedRegions = mutableSetOf<String>()
-
-    // When each automatic narration was queued, for the per-hour cap.
-    // Entries older than the window are pruned as new ones arrive.
-    //
-    // Copy-on-write because two places in range on one fix now alert
-    // separately, so the cap is read and written from concurrent coroutines
-    // and a plain list would throw ConcurrentModificationException mid-count.
-    // The list is at most a few dozen entries. Ownership and atomicity are
-    // still A7's to fix; this only closes the crash.
-    private val narrationTimes = CopyOnWriteArrayList<Long>()
 
     companion object {
         // Search this far around the user (or route samples) for POIs
@@ -377,7 +365,6 @@ class TourModeService : Service() {
         wayOfLifeJob?.cancel()
         wayOfLifeJob = null
         lastWayOfLifeAt = null
-        narratedRegions.clear()
         routeCorridorActive = false
         lastFetchCenter = null
         locationAwarenessService.stopProximityMonitoring()
@@ -395,9 +382,11 @@ class TourModeService : Service() {
         audioService.stop()
         _currentNarration.value = null
 
-        // Clear content queue
+        // Clear content queue, the hourly cap, the regions covered and the
+        // delivery flag. Any loop still unwinding is orphaned by the reset,
+        // so it can't hand the flag back after a new tour has taken it.
         contentService.clearContentQueue()
-        isDelivering = false
+        session.reset()
 
         // Update service state
         _serviceState.value = TourModeState.Inactive
@@ -669,12 +658,11 @@ class TourModeService : Service() {
 
         // Honor the "max notifications per hour" setting: a tour guide who
         // won't stop talking gets tuned out. Skipped places stay unvisited,
-        // so they're eligible again once the hour rolls over.
+        // so they're eligible again once the hour rolls over. This look is
+        // advisory — it saves a content fetch that the cap would waste; the
+        // slot is claimed for real once there is something to queue.
         val now = System.currentTimeMillis()
-        while (narrationTimes.isNotEmpty() && now - narrationTimes.first() > TourLogic.NARRATION_WINDOW_MS) {
-            narrationTimes.removeAt(0)
-        }
-        if (!TourLogic.narrationAllowed(narrationTimes, now, userPreferences.maxNotificationsPerHour)) {
+        if (!session.canNarrate(now, userPreferences.maxNotificationsPerHour)) {
             Timber.d("Skipping ${poi.name}: cap of ${userPreferences.maxNotificationsPerHour} narrations/hour reached")
             return
         }
@@ -700,15 +688,27 @@ class TourModeService : Service() {
             val calculatedPriority =
                 TourLogic.contentPriorityFor(poi, userPreferences, priority, hasRichContent)
 
-            // Queue for delivery; only accepted narrations count toward the cap
-            if (contentService.queueContentForDelivery(content, calculatedPriority)) {
-                narrationTimes.add(now)
+            // Claim the cap slot and queue in one breath: checking the cap
+            // and recording the narration separately let two alerts from one
+            // location fix both slip past a cap of one. Only accepted
+            // narrations count, so a duplicate hands its slot back.
+            if (!session.tryReserveNarration(now, userPreferences.maxNotificationsPerHour)) {
+                Timber.d("Skipping ${poi.name}: hourly cap reached while fetching content")
+                return
+            }
+            val queued = contentService.queueContentForDelivery(content, calculatedPriority)
+            if (!queued) {
+                // Already waiting, or already told: the slot wasn't spent
+                session.releaseNarration(now)
             }
 
-            // If nothing is being spoken or scheduled, start speaking
-            if (!audioService.isSpeaking() && !isDelivering) {
-                deliverNextContent()
-            } else {
+            // If nothing is being spoken or scheduled, start delivering. The
+            // session is the authority on whether a loop is already running;
+            // this check just keeps the "up next" card honest during the pause
+            // between two narrations.
+            if (!audioService.isSpeaking() && !session.isDelivering) {
+                deliverQueuedContent()
+            } else if (queued) {
                 // Mid-narration: surface the newly queued place as "up next"
                 _currentNarration.value = _currentNarration.value?.copy(upNextTitle = upNextTitle())
             }
@@ -718,116 +718,129 @@ class TourModeService : Service() {
     }
 
     /**
-     * Deliver the next piece of content in the queue. [consecutiveErrors]
-     * counts speech failures in the current chain: a broken or muted engine
-     * fails instantly, and an unbounded retry would empty the queue in one
-     * pass, so the chain gives up and leaves the rest for the next trigger.
+     * Tell the queued stories, one after another, until the queue runs dry or
+     * something takes the audio away.
+     *
+     * One loop at a time: the session hands out the right to deliver, so a
+     * geofence and a proximity alert arriving together can't both start
+     * telling stories. Errors are counted across the loop — a broken or muted
+     * engine fails instantly, and retrying without limit would empty the
+     * queue in one pass, so the loop gives up and leaves the rest for the
+     * next trigger.
      */
-    private suspend fun deliverNextContent(consecutiveErrors: Int = 0) {
+    private suspend fun deliverQueuedContent() {
+        val delivery = session.beginDelivery() ?: return
         try {
-            isDelivering = true
-            val content = contentService.getNextContent()
-            if (content == null) {
-                _currentNarration.value = null
-                isDelivering = false
-                return
-            }
+            var consecutiveErrors = 0
 
-            val poi = placesRepository.getPlaceDetails(content.poiId).getOrNull()
+            while (true) {
+                val content = contentService.getNextContent()
+                if (content == null) {
+                    _currentNarration.value = null
+                    return
+                }
 
-            // Queued narrations can be overtaken by the drive. A guide
-            // previews what's coming; a place that's already well behind
-            // the listener is a story whose moment has passed — drop it and
-            // move on (it stays unvisited, so a future pass can tell it).
-            val (direction, distanceMeters) = poiGeometry(poi)
-            if (TourLogic.narrationIsStale(direction, distanceMeters)) {
-                Timber.d("Skipping ${content.title}: already ${distanceMeters?.toInt()}m behind")
-                // A skip is not a failure; the error run carries over unchanged
-                deliverNextContent(consecutiveErrors)
-                return
-            }
+                val poi = placesRepository.getPlaceDetails(content.poiId).getOrNull()
 
-            // Set as current POI
-            currentPoi = poi
+                // Queued narrations can be overtaken by the drive. A guide
+                // previews what's coming; a place that's already well behind
+                // the listener is a story whose moment has passed — drop it and
+                // move on (it stays unvisited, so a future pass can tell it).
+                val (direction, distanceMeters) = poiGeometry(poi)
+                if (TourLogic.narrationIsStale(direction, distanceMeters)) {
+                    Timber.d("Skipping ${content.title}: already ${distanceMeters?.toInt()}m behind")
+                    // A skip is not a failure; the error run carries on unchanged
+                    continue
+                }
 
-            _currentNarration.value = Narration(
-                poiId = poi?.placeId ?: content.poiId,
-                poiName = poi?.name ?: content.title,
-                category = poi?.category,
-                factText = content.content,
-                upNextTitle = upNextTitle(),
-                sourceUrl = content.metadata["sourceUrl"]
-            )
-            _isNarrationPlaying.value = true
+                // Set as current POI
+                currentPoi = poi
 
-            // Speak the content, introduced like a live tour guide
-            // ("On your left: Fort Point. ..."). The chain continues after
-            // the flow finishes, so an interrupted utterance (stopped, or
-            // flushed by a newer one) ends the chain cleanly instead of
-            // leaving the delivery flag stuck.
-            var outcome: AudioService.SpeakingStatus? = null
-            audioService.speak(spokenNarrationFor(poi, content, direction, distanceMeters))
-                .collectLatest { status ->
-                    when (status) {
-                        AudioService.SpeakingStatus.COMPLETED -> {
-                            // Told, so nothing queues this place again for the
-                            // rest of the tour however many times it re-alerts
-                            contentService.markContentDelivered(content.poiId)
+                _currentNarration.value = Narration(
+                    poiId = poi?.placeId ?: content.poiId,
+                    poiName = poi?.name ?: content.title,
+                    category = poi?.category,
+                    factText = content.content,
+                    upNextTitle = upNextTitle(),
+                    sourceUrl = content.metadata["sourceUrl"]
+                )
+                _isNarrationPlaying.value = true
 
-                            // Remember this place was narrated, with a fresh
-                            // timestamp so the revisit cooldown restarts (a
-                            // re-narrated place shouldn't repeat every pass)
-                            poi?.let {
-                                placesRepository.saveVisitedPlace(
-                                    it.copy(isVisited = true, visitedDate = System.currentTimeMillis())
-                                )
-                                updateTripHighlight(it)
+                // Speak the content, introduced like a live tour guide
+                // ("On your left: Fort Point. ..."). The loop resumes once the
+                // flow finishes, so an interrupted utterance (stopped, or
+                // flushed by a newer one) ends the loop cleanly instead of
+                // leaving the delivery flag stuck.
+                var outcome: AudioService.SpeakingStatus? = null
+                session.clearSkipRequest()
+                audioService.speak(spokenNarrationFor(poi, content, direction, distanceMeters))
+                    .collectLatest { status ->
+                        when (status) {
+                            AudioService.SpeakingStatus.COMPLETED -> {
+                                // Told, so nothing queues this place again for
+                                // the rest of the tour however often it re-alerts
+                                contentService.markContentDelivered(content.poiId)
+
+                                // Remember this place was narrated, with a fresh
+                                // timestamp so the revisit cooldown restarts (a
+                                // re-narrated place shouldn't repeat every pass)
+                                poi?.let {
+                                    placesRepository.saveVisitedPlace(
+                                        it.copy(isVisited = true, visitedDate = System.currentTimeMillis())
+                                    )
+                                    updateTripHighlight(it)
+                                }
+                                tripNarrationCount++
+                                lastSpokenAt = System.currentTimeMillis()
+                                outcome = status
                             }
-                            tripNarrationCount++
-                            lastSpokenAt = System.currentTimeMillis()
-                            outcome = status
-                        }
-                        AudioService.SpeakingStatus.ERROR -> {
-                            Timber.e("Error speaking content for ${content.title}")
-                            outcome = status
-                        }
-                        else -> {
-                            // No action needed for other statuses
+                            AudioService.SpeakingStatus.ERROR -> {
+                                Timber.e("Error speaking content for ${content.title}")
+                                outcome = status
+                            }
+                            else -> {
+                                // No action needed for other statuses
+                            }
                         }
                     }
-                }
 
-            when (outcome) {
-                AudioService.SpeakingStatus.COMPLETED -> {
-                    // Breathing room before the next story: guides leave
-                    // listeners time to look and talk instead of lecturing
-                    // wall to wall
-                    if (contentService.peekNextContent() != null) {
-                        delay(TourLogic.INTER_NARRATION_PAUSE_MS)
+                when (outcome) {
+                    AudioService.SpeakingStatus.COMPLETED -> {
+                        // A success ends the error run
+                        consecutiveErrors = 0
+
+                        // Breathing room before the next story: guides leave
+                        // listeners time to look and talk instead of lecturing
+                        // wall to wall
+                        if (contentService.peekNextContent() != null) {
+                            delay(TourLogic.INTER_NARRATION_PAUSE_MS)
+                        }
                     }
-                    // A success ends the error run
-                    deliverNextContent(consecutiveErrors = 0)
-                }
-                AudioService.SpeakingStatus.ERROR -> {
-                    val errorRun = consecutiveErrors + 1
-                    if (TourLogic.shouldKeepDeliveringAfterError(errorRun)) {
-                        deliverNextContent(errorRun)
-                    } else {
-                        // The engine isn't speaking at all. Leave the rest of
-                        // the queue for the next trigger rather than burning
-                        // it, and drop the card — nothing is being said.
-                        Timber.w("Giving up delivery after $errorRun speech failures in a row")
-                        _currentNarration.value = null
-                        isDelivering = false
+                    AudioService.SpeakingStatus.ERROR -> {
+                        consecutiveErrors++
+                        if (!TourLogic.shouldKeepDeliveringAfterError(consecutiveErrors)) {
+                            // The engine isn't speaking at all. Leave the rest
+                            // of the queue for the next trigger rather than
+                            // burning it, and drop the card — nothing is being
+                            // said.
+                            Timber.w("Giving up delivery after $consecutiveErrors speech failures in a row")
+                            _currentNarration.value = null
+                            return
+                        }
+                    }
+                    else -> {
+                        // Interrupted. If the listener asked for the next story,
+                        // that is exactly what this loop does next; anything
+                        // else owns the audio now, so stand down.
+                        if (!session.consumeSkipRequest()) return
+                        Timber.d("Skipping to the next story on request")
                     }
                 }
-                // Interrupted mid-utterance: whatever interrupted owns the
-                // audio now; the queue waits for the next trigger
-                else -> isDelivering = false
             }
         } catch (e: Exception) {
             Timber.e(e, "Error delivering content")
-            isDelivering = false
+        } finally {
+            session.endDelivery(delivery)
         }
     }
 
@@ -871,7 +884,7 @@ class TourModeService : Service() {
     private suspend fun maybePlayWayOfLife() {
         if (!userPreferences.audioEnabled || !userPreferences.autoPlayContent) return
 
-        val narrationBusy = audioService.isSpeaking() || isDelivering ||
+        val narrationBusy = audioService.isSpeaking() || session.isDelivering ||
             contentService.peekNextContent() != null
         val speed = locationAwarenessService.getCurrentSpeed() ?: 0f
         val now = System.currentTimeMillis()
@@ -880,8 +893,9 @@ class TourModeService : Service() {
         }
 
         // Filler is still automatic narration: it counts against the hourly
-        // cap, and a cap of zero mutes it like everything else automatic
-        if (!TourLogic.narrationAllowed(narrationTimes, now, userPreferences.maxNotificationsPerHour)) {
+        // cap, and a cap of zero mutes it like everything else automatic.
+        // Advisory here, claimed for real once there is something to say.
+        if (!session.canNarrate(now, userPreferences.maxNotificationsPerHour)) {
             return
         }
 
@@ -889,7 +903,7 @@ class TourModeService : Service() {
         val region = nearbyCityApiService
             .nearbyCities(location, WAY_OF_LIFE_CITY_RADIUS_METERS)
             .firstOrNull() ?: return
-        if (!narratedRegions.add(region.name)) {
+        if (!session.markRegionNarrated(region.name)) {
             // Nearest region already covered this session; wait out a full
             // cooldown instead of re-running the lookup every pass
             lastWayOfLifeAt = now
@@ -904,20 +918,23 @@ class TourModeService : Service() {
             region.name, region.latLng, effectivePreferences
         )
         if (content == null) {
-            // Undocumented region: narratedRegions remembers it, so it isn't
-            // retried until the next tour session
+            // Undocumented region: the session remembers it, so it isn't
+            // retried until the next tour
             lastWayOfLifeAt = now
             return
         }
 
         // A sight may have arrived while we were fetching; it wins
-        if (audioService.isSpeaking() || isDelivering ||
+        if (audioService.isSpeaking() || session.isDelivering ||
             contentService.peekNextContent() != null
         ) {
             return
         }
 
-        narrationTimes.add(now)
+        // Claim the cap slot now, at the point of actually speaking
+        if (!session.tryReserveNarration(now, userPreferences.maxNotificationsPerHour)) {
+            return
+        }
         lastWayOfLifeAt = now
         _currentNarration.value = Narration(
             poiId = null, // regional color, not a place with details to open
@@ -948,10 +965,10 @@ class TourModeService : Service() {
         if (_currentNarration.value?.poiId == null) {
             _currentNarration.value = null
         }
-        if (!isDelivering && contentService.peekNextContent() != null) {
+        if (!session.isDelivering && contentService.peekNextContent() != null) {
             delay(TourLogic.INTER_NARRATION_PAUSE_MS)
-            if (!isDelivering) {
-                deliverNextContent()
+            if (!session.isDelivering) {
+                deliverQueuedContent()
             }
         }
     }
@@ -1198,12 +1215,16 @@ class TourModeService : Service() {
      * Handle next POI action from notification.
      */
     private fun handleNextPoiAction() {
-        serviceScope.launch {
-            // Stop current audio
-            audioService.stop()
+        // Tell the delivery loop this interruption means "move on" — stopping
+        // the audio looks exactly like something else taking the floor, and
+        // starting a second loop here is what let two of them fight over the
+        // delivery flag.
+        session.requestSkip()
+        audioService.stop()
 
-            // Get next content if available
-            deliverNextContent()
+        // If nothing was delivering, the request still has to start something
+        serviceScope.launch {
+            deliverQueuedContent()
         }
     }
 
