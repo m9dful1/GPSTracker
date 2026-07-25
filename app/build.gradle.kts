@@ -101,6 +101,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation(libs.material)
     implementation(libs.androidx.activity)
+    implementation(libs.androidx.fragment)
     implementation(libs.androidx.constraintlayout)
     
     // MapLibre map rendering (OpenStreetMap vector tiles, no API key)
@@ -117,11 +118,7 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    
-    // Navigation component
-    implementation("androidx.navigation:navigation-fragment-ktx:2.7.7")
-    implementation("androidx.navigation:navigation-ui-ktx:2.7.7")
-    
+
     // Lifecycle components
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.7.0")
@@ -137,12 +134,12 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
     
-    // Retrofit for network requests
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.11.0")
-    
-    // Gson for JSON parsing
+    // OkHttp: every API service here is hand-rolled against it. Declared
+    // explicitly rather than inherited from the map SDK, which is a
+    // swappable choice and shouldn't be what supplies the HTTP client.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Gson, for the LatLng column converter
     implementation("com.google.code.gson:gson:2.10.1")
     
     // Dagger Hilt for dependency injection (using KSP instead of KAPT)

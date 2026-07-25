@@ -232,7 +232,7 @@ has only `deleteAllContent()`, which nothing calls.
 **Fix:** age- or size-based trim, plus a "clear cached stories" control in
 settings. Must be migration-safe once A14 lands (no `DROP TABLE`).
 
-### A16 · Dead code and dead dependencies — `TODO`
+### A16 · Dead code and dead dependencies — `DONE`
 
 Unused source: `domain/usecase/` (all three files),
 `domain/service/PlacesService.kt`, `domain/repository/ContentRepository.kt`,
@@ -837,3 +837,41 @@ Tests: 5 cases in `StoryCachePolicyTest` (367 total, 0 failures) over the
 cutoff, a story from today surviving it, one past the age falling before it, and
 the cap boundary in both directions. The queries themselves need Room and an
 instrumented test to exercise; the policy they enforce is what these pin.
+
+### A16 — "Delete what nothing uses"
+
+Gone, each re-checked for references first: `domain/usecase/` (all three —
+`GenerateContentForPlaceUseCase`, `GetNearbyPointsOfInterestUseCase`,
+`SpeakContentUseCase`), `domain/service/PlacesService.kt`,
+`domain/repository/ContentRepository.kt` (referenced only by the use case that
+went with it), and both IDE template tests. `retrofit`, `converter-gson`,
+`logging-interceptor`, `navigation-fragment-ktx` and `navigation-ui-ktx` are out
+of the build — there is no `res/navigation`, no `NavHostFragment`, and every API
+service here is hand-rolled OkHttp.
+
+**Two things the app was getting by accident, now declared.** Removing those
+libraries broke the build in a way worth recording, because it means the
+dependency list was lying about what the app depends on:
+
+- **OkHttp** was only ever transitive — from Retrofit and the logging
+  interceptor, and after them from the MapLibre SDK. The entire data layer is
+  written against it. It is declared explicitly now (4.12.0, the version that
+  already resolved, so nothing moved), because the map SDK is a swappable
+  choice and shouldn't be what supplies the HTTP client.
+- **`fragment-ktx` and `activity-ktx`** supply the `by viewModels()` and
+  `by activityViewModels()` delegates that `MainActivity` and three fragments
+  use. Those arrived through `navigation-fragment-ktx`; the base `fragment` and
+  `activity` artifacts don't carry them. Both are now in the version catalog,
+  with `androidx-activity` switched from `activity` to `activity-ktx`.
+
+**`darkModeEnabled` is dropped**, not wired up. The theme is already
+`Theme.MaterialComponents.DayNight.NoActionBar` with a `values-night/colors.xml`
+beside it, so the app follows the system today and nothing is lost by removing
+the flag. Wiring the flag as it stood would have been worse than nothing: a
+`Boolean` can't say "follow the system", so `false` — its default — would have
+forced light mode on someone whose phone is in dark mode. An explicit override
+wants three states, and this field wouldn't have been reusable for that anyway.
+
+No new tests: this is removal, and the tally drops by one (366) because
+`ExampleUnitTest` was one of the deletions. Debug and release both compile,
+and nothing named retrofit or navigation remains on the runtime classpath.

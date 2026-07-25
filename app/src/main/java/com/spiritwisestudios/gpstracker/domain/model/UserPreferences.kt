@@ -19,8 +19,7 @@ data class UserPreferences(
     val notifyDistance: Int = 200, // Distance in meters to trigger notification
     val maxNotificationsPerHour: Int = 10,
     val prefetchContent: Boolean = true,
-    val useMobileData: Boolean = false,
-    val darkModeEnabled: Boolean = false
+    val useMobileData: Boolean = false
 ) {
     /**
      * Level of detail for content

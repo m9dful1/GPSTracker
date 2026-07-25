@@ -45,7 +45,6 @@ class UserPreferencesRepository @Inject constructor(
         val MAX_NOTIFICATIONS_PER_HOUR = intPreferencesKey("max_notifications_per_hour")
         val PREFETCH_CONTENT = booleanPreferencesKey("prefetch_content")
         val USE_MOBILE_DATA = booleanPreferencesKey("use_mobile_data")
-        val DARK_MODE_ENABLED = booleanPreferencesKey("dark_mode_enabled")
         val PREFERRED_CATEGORIES = stringSetPreferencesKey("preferred_categories")
         // Deliberately a fresh key: "map_type" stored GoogleMap constants
         // before the MapLibre migration, which don't map onto styles.
@@ -102,8 +101,7 @@ class UserPreferencesRepository @Inject constructor(
                 notifyDistance = preferences[PreferencesKeys.NOTIFY_DISTANCE] ?: 200,
                 maxNotificationsPerHour = preferences[PreferencesKeys.MAX_NOTIFICATIONS_PER_HOUR] ?: 10,
                 prefetchContent = preferences[PreferencesKeys.PREFETCH_CONTENT] ?: true,
-                useMobileData = preferences[PreferencesKeys.USE_MOBILE_DATA] ?: false,
-                darkModeEnabled = preferences[PreferencesKeys.DARK_MODE_ENABLED] ?: false
+                useMobileData = preferences[PreferencesKeys.USE_MOBILE_DATA] ?: false
             )
         }
 
@@ -122,7 +120,6 @@ class UserPreferencesRepository @Inject constructor(
             preferences[PreferencesKeys.MAX_NOTIFICATIONS_PER_HOUR] = userPreferences.maxNotificationsPerHour
             preferences[PreferencesKeys.PREFETCH_CONTENT] = userPreferences.prefetchContent
             preferences[PreferencesKeys.USE_MOBILE_DATA] = userPreferences.useMobileData
-            preferences[PreferencesKeys.DARK_MODE_ENABLED] = userPreferences.darkModeEnabled
             preferences[PreferencesKeys.PREFERRED_CATEGORIES] =
                 userPreferences.preferredCategories.map { it.name }.toSet()
         }
