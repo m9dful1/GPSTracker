@@ -264,7 +264,7 @@ No `signingConfig`; `isMinifyEnabled = false`; `versionCode = 1` /
 `assembleDebug + testDebugUnitTest + lintDebug`, and set up release signing
 and shrinking.
 
-### A19 · The buggiest file has zero tests — `TODO`
+### A19 · The buggiest file has zero tests — `DONE`
 
 `TourLogic`'s pure functions are thoroughly covered, but `TourModeService` —
 1146 lines holding every issue in Tiers 1–2 — has no tests, and neither do
@@ -953,3 +953,46 @@ were a correctness question rather than housekeeping.
 
 Tests: unchanged at 366, 0 failures. `lintDebug` green for the first time since
 round 1, and `assembleRelease` builds through R8.
+
+### A19 — "Put the delivery loop where it can be tested"
+
+The loop moved out of `TourModeService` into `service/NarrationDelivery`, a
+plain class taking `TourSession`, `ContentService`, `AudioService` and a
+`Host` interface for the service-side effects — the fact card, the visit
+record, the trip tally, the place lookup and the spoken introduction. The
+service implements `Host` and keeps a one-line `deliverQueuedContent()`.
+
+The extraction was cheap because the collaborators were already interfaces;
+what made the loop untestable was the `Service` wrapped around it, not the
+dependencies. `NarrationDeliveryTest` fakes `ContentService` over a real
+`ContentDeliveryQueue` and scripts `AudioService` outcome by outcome, so the
+behaviours the earlier tasks argued about are now asserted:
+
+- every queued story told in priority order, and marked so it can't be queued
+  again (A5);
+- a place already behind the car skipped without being spoken, recorded or
+  marked (the stale drop);
+- **a stale skip not spending the error budget** — the case the A1 comment
+  claimed and nothing checked;
+- a dead engine giving up after `MAX_CONSECUTIVE_DELIVERY_ERRORS` with the rest
+  of the queue intact for the next trigger, and a success resetting the run
+  (A1);
+- an interruption standing the loop down, a skip request carrying it to the
+  next story instead (A8's "Next" rework);
+- one loop at a time, and the gate released when it ends (A8).
+
+**Two tests I had to rewrite because my premise was wrong, which is the point
+of writing them.** I first scripted "fail, fail, succeed" over two stories and
+expected both told; a failed story is *consumed* from the queue, not retried, so
+nothing was told at all. The same mistake sat in my stale-skip test. Both now
+use more stories than the cap, which is the only arrangement that can actually
+distinguish a reset run from a spent one. Reasoning about this loop is exactly
+what kept going wrong.
+
+Tests: 12 cases in `NarrationDeliveryTest` (378 total, 0 failures).
+
+**What still has no tests, honestly:** `maybePlayWayOfLife` (its policy is
+covered in `TourLogicTest`, its orchestration isn't), the geofence and proximity
+handlers, and `startTourMode`/`stopTourMode`. Those are Android lifecycle and
+notification work; the same `Host`-style seam would extract them, but each is a
+smaller behaviour than the delivery loop and none of them held a Tier 1 bug.

@@ -122,6 +122,61 @@ class TourModeService : Service() {
     // rather than as separate fields with separate races.
     private val session = TourSession()
 
+    /**
+     * What the delivery loop needs from the service: the place behind an id,
+     * where it sits, how to introduce it, and what to record afterwards.
+     */
+    private val deliveryHost = object : NarrationDelivery.Host {
+
+        override suspend fun placeFor(poiId: String): PointOfInterest? = placeById(poiId)
+
+        override suspend fun geometryFor(
+            poi: PointOfInterest?
+        ): Pair<TourLogic.RelativeDirection?, Float?> = poiGeometry(poi)
+
+        override fun spokenNarration(
+            poi: PointOfInterest?,
+            content: TourContent,
+            direction: TourLogic.RelativeDirection?,
+            distanceMeters: Float?
+        ): String = spokenNarrationFor(poi, content, direction, distanceMeters)
+
+        override fun onNarrating(poi: PointOfInterest?, content: TourContent) {
+            currentPoi = poi
+            _currentNarration.value = Narration(
+                poiId = poi?.placeId ?: content.poiId,
+                poiName = poi?.name ?: content.title,
+                category = poi?.category,
+                factText = content.content,
+                upNextTitle = upNextTitle(),
+                sourceUrl = content.metadata["sourceUrl"]
+            )
+            _isNarrationPlaying.value = true
+        }
+
+        override fun onNothingNarrating() {
+            _currentNarration.value = null
+        }
+
+        override suspend fun onNarrated(poi: PointOfInterest?, content: TourContent) {
+            // Remember this place was narrated, with a fresh timestamp so the
+            // revisit cooldown restarts (a re-narrated place shouldn't repeat
+            // every pass). Only the visit is written: this copy came from
+            // discovery and may not carry the user's notes.
+            poi?.let {
+                placesRepository.markPlaceNarrated(it, System.currentTimeMillis())
+                updateTripHighlight(it)
+            }
+            tripNarrationCount++
+            lastSpokenAt = System.currentTimeMillis()
+        }
+    }
+
+    // Injected fields aren't set until onCreate, so this waits for first use
+    private val delivery: NarrationDelivery by lazy {
+        NarrationDelivery(session, contentService, audioService, deliveryHost)
+    }
+
     // Way-of-life filler state: when the guide last said anything, when the
     // last filler played, how many region lookups in a row found nothing (the
     // watcher backs off rather than re-asking every 30 seconds), and the
@@ -752,130 +807,12 @@ class TourModeService : Service() {
     }
 
     /**
-     * Tell the queued stories, one after another, until the queue runs dry or
-     * something takes the audio away.
-     *
-     * One loop at a time: the session hands out the right to deliver, so a
-     * geofence and a proximity alert arriving together can't both start
-     * telling stories. Errors are counted across the loop — a broken or muted
-     * engine fails instantly, and retrying without limit would empty the
-     * queue in one pass, so the loop gives up and leaves the rest for the
-     * next trigger.
+     * Tell the queued stories. The loop itself lives in [NarrationDelivery] so
+     * it can be tested without a running service; this hands it the tour's
+     * collaborators and the service-side effects.
      */
     private suspend fun deliverQueuedContent() {
-        val delivery = session.beginDelivery() ?: return
-        try {
-            var consecutiveErrors = 0
-
-            while (true) {
-                val content = contentService.getNextContent()
-                if (content == null) {
-                    _currentNarration.value = null
-                    return
-                }
-
-                val poi = placeById(content.poiId)
-
-                // Queued narrations can be overtaken by the drive. A guide
-                // previews what's coming; a place that's already well behind
-                // the listener is a story whose moment has passed — drop it and
-                // move on (it stays unvisited, so a future pass can tell it).
-                val (direction, distanceMeters) = poiGeometry(poi)
-                if (TourLogic.narrationIsStale(direction, distanceMeters)) {
-                    Timber.d("Skipping ${content.title}: already ${distanceMeters?.toInt()}m behind")
-                    // A skip is not a failure; the error run carries on unchanged
-                    continue
-                }
-
-                // Set as current POI
-                currentPoi = poi
-
-                _currentNarration.value = Narration(
-                    poiId = poi?.placeId ?: content.poiId,
-                    poiName = poi?.name ?: content.title,
-                    category = poi?.category,
-                    factText = content.content,
-                    upNextTitle = upNextTitle(),
-                    sourceUrl = content.metadata["sourceUrl"]
-                )
-                _isNarrationPlaying.value = true
-
-                // Speak the content, introduced like a live tour guide
-                // ("On your left: Fort Point. ..."). The loop resumes once the
-                // flow finishes, so an interrupted utterance (stopped, or
-                // flushed by a newer one) ends the loop cleanly instead of
-                // leaving the delivery flag stuck.
-                var outcome: AudioService.SpeakingStatus? = null
-                session.clearSkipRequest()
-                audioService.speak(spokenNarrationFor(poi, content, direction, distanceMeters))
-                    .collectLatest { status ->
-                        when (status) {
-                            AudioService.SpeakingStatus.COMPLETED -> {
-                                // Told, so nothing queues this place again for
-                                // the rest of the tour however often it re-alerts
-                                contentService.markContentDelivered(content.poiId)
-
-                                // Remember this place was narrated, with a fresh
-                                // timestamp so the revisit cooldown restarts (a
-                                // re-narrated place shouldn't repeat every pass).
-                                // Only the visit is written: this copy came from
-                                // discovery and may not carry the user's notes.
-                                poi?.let {
-                                    placesRepository.markPlaceNarrated(it, System.currentTimeMillis())
-                                    updateTripHighlight(it)
-                                }
-                                tripNarrationCount++
-                                lastSpokenAt = System.currentTimeMillis()
-                                outcome = status
-                            }
-                            AudioService.SpeakingStatus.ERROR -> {
-                                Timber.e("Error speaking content for ${content.title}")
-                                outcome = status
-                            }
-                            else -> {
-                                // No action needed for other statuses
-                            }
-                        }
-                    }
-
-                when (outcome) {
-                    AudioService.SpeakingStatus.COMPLETED -> {
-                        // A success ends the error run
-                        consecutiveErrors = 0
-
-                        // Breathing room before the next story: guides leave
-                        // listeners time to look and talk instead of lecturing
-                        // wall to wall
-                        if (contentService.peekNextContent() != null) {
-                            delay(TourLogic.INTER_NARRATION_PAUSE_MS)
-                        }
-                    }
-                    AudioService.SpeakingStatus.ERROR -> {
-                        consecutiveErrors++
-                        if (!TourLogic.shouldKeepDeliveringAfterError(consecutiveErrors)) {
-                            // The engine isn't speaking at all. Leave the rest
-                            // of the queue for the next trigger rather than
-                            // burning it, and drop the card — nothing is being
-                            // said.
-                            Timber.w("Giving up delivery after $consecutiveErrors speech failures in a row")
-                            _currentNarration.value = null
-                            return
-                        }
-                    }
-                    else -> {
-                        // Interrupted. If the listener asked for the next story,
-                        // that is exactly what this loop does next; anything
-                        // else owns the audio now, so stand down.
-                        if (!session.consumeSkipRequest()) return
-                        Timber.d("Skipping to the next story on request")
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "Error delivering content")
-        } finally {
-            session.endDelivery(delivery)
-        }
+        delivery.deliverQueued()
     }
 
     /**
