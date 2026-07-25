@@ -86,7 +86,18 @@ interface ContentService {
     fun peekNextContent(): TourContent?
 
     /**
-     * Clear the content delivery queue.
+     * Record that a place's story has been told, so the same place isn't
+     * queued again for the rest of the tour. Called when a narration
+     * finishes, not when it is dequeued: content dropped for being behind
+     * the listener was never actually told.
+     *
+     * @param poiId The place whose content was narrated
+     */
+    fun markContentDelivered(poiId: String)
+
+    /**
+     * Clear the content delivery queue, and with it the record of what has
+     * been told. Ends the tour session.
      */
     fun clearContentQueue()
     

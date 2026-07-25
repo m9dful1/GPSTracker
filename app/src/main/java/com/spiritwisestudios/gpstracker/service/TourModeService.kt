@@ -763,6 +763,10 @@ class TourModeService : Service() {
                 .collectLatest { status ->
                     when (status) {
                         AudioService.SpeakingStatus.COMPLETED -> {
+                            // Told, so nothing queues this place again for the
+                            // rest of the tour however many times it re-alerts
+                            contentService.markContentDelivered(content.poiId)
+
                             // Remember this place was narrated, with a fresh
                             // timestamp so the revisit cooldown restarts (a
                             // re-narrated place shouldn't repeat every pass)

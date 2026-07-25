@@ -278,7 +278,11 @@ class ContentServiceImpl(
 
     override fun queueContentForDelivery(content: TourContent, priority: Int): Boolean {
         val queued = deliveryQueue.offer(content, priority)
-        Timber.d("Queued content: ${content.title} with priority $priority")
+        if (queued) {
+            Timber.d("Queued content: ${content.title} with priority $priority")
+        } else {
+            Timber.d("Not queuing ${content.title}: already queued or already told")
+        }
         return queued
     }
 
@@ -288,6 +292,10 @@ class ContentServiceImpl(
 
     override fun peekNextContent(): TourContent? {
         return deliveryQueue.peek()
+    }
+
+    override fun markContentDelivered(poiId: String) {
+        deliveryQueue.markDelivered(poiId)
     }
 
     override fun clearContentQueue() {

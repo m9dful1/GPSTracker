@@ -88,7 +88,7 @@ Mode Active" notification with no monitoring behind it.
 **Fix:** treat a null intent as "resume the tour" (settings are persisted
 anyway), or return `START_NOT_STICKY`.
 
-### A5 · The same story can be told twice — `TODO`
+### A5 · The same story can be told twice — `DONE`
 
 `ContentDeliveryQueue.offer` (`ContentDeliveryQueue.kt:20`) has no dedup, and
 three paths queue content for one place: geofence `enter`, geofence `dwell`
@@ -462,3 +462,38 @@ action.
 registered, `stopTourMode()` returns early and they are never unregistered.
 Not touched here — it belongs with A7/A8's single-owner rework of the tour's
 state.
+
+### A5 — "Tell each place once"
+
+`ContentDeliveryQueue` now enforces one place, one telling, in two parts:
+
+- **At most one pending entry per `poiId`.** The geofence `enter`, the `dwell`
+  30 s later and a proximity alert all queue the same story; the second and
+  third are refused. A *stronger* claim is the exception — an `ARRIVED` alert
+  (priority 5) after an `APPROACHING` one (3) replaces the waiting entry
+  instead of queueing behind it, so the story moves up the queue rather than
+  being told twice.
+- **A set of places already told**, checked on `offer`. That closes the
+  re-alert case the old `currentPoi?.id != poi.id` guard could not: it only
+  held while the place was still current, so a place re-alerting after the
+  guide moved on queued again.
+
+The delivered set is marked from `TourModeService` on `COMPLETED`, through a
+new `ContentService.markContentDelivered`, deliberately **not** from `poll()`.
+Content can be polled and then dropped for being behind the listener
+(`TourLogic.narrationIsStale`), and that place was never actually narrated —
+the existing comment promises a future pass can still tell it, and marking on
+dequeue would have quietly broken that promise. `clear()` drops both the
+pending entries and the told set, so the next tour starts fresh; the only
+caller is `stopTourMode()`.
+
+Two things this deliberately does not change: on-demand playback from the
+place details sheet goes straight to `AudioService`, never through the queue,
+so a place can still be replayed by hand after the guide has told it; and the
+`currentPoi?.id` pre-checks in the geofence and proximity handlers are now
+redundant but harmless, so they stayed.
+
+Tests: 7 new cases in `ContentDeliveryQueueTest` (304 total, 0 failures)
+covering enter+dwell, arrival replacing approach, the weaker claim, the
+re-alert after telling, the stale-drop re-queue, other places being
+unaffected, and a fresh tour after `clear()`.
