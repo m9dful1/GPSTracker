@@ -3,7 +3,7 @@
 A working log for the audit-and-fix loop: the open task list, what was done
 about each one, and what later audit rounds find. Round 1 was a full read of
 every Kotlin source file (13.1k lines) plus `testDebugUnitTest` and
-`lintDebug`.
+`lintDebug`. Round 2 begins after the twenty tasks it opened were all done.
 
 ## How this log is used
 
@@ -1045,3 +1045,164 @@ Three findings were banked along the way for the next round rather than fixed
 out of scope: the `JSONException` sweep across six API services (A10), the
 `Error`-state geofence leak (A4, A7/A8), and the lint warning groups A18
 deferred.
+
+---
+
+# Round 2
+
+A second full pass, after round 1's twenty tasks. The reading went where round
+1 spent least time — the map controllers, the UI sheets, the preferences layer,
+the Gemini and ads code — plus a re-read of what round 1 itself changed, and
+the three findings round 1 banked deliberately.
+
+## Baseline at round 2
+
+- 382 unit tests, 0 failures.
+- `lintDebug` **passes**: 0 errors, 78 warnings.
+- CI builds debug, tests, lints and runs R8 over a release build.
+- Release signs from a keystore when one is configured; shrinking on.
+
+**Two files got bigger, not smaller.** `MainActivity` went 1391 → 1512 lines
+and `TourModeService` 1146 → 1287, even though round 1 extracted the delivery
+loop *out* of the service. Nine new pure classes carried logic out to where it
+could be tested, but the fixes also added routing, state and comments to the
+two files that were already the largest. That is the honest shape of round 1:
+the *hard* parts became testable; the *big* parts stayed big.
+
+---
+
+## Tier 1 — breaks in normal use
+
+### B1 · A corrupt preferences file crashes every launch — `TODO`
+
+`preferencesDataStore(name = "user_preferences")` is created with no
+`corruptionHandler` (`UserPreferencesRepository.kt:25`) and none of its flows
+carry a `.catch`. `GPSTrackerApplication.onCreate` reads two of them with
+`runBlocking { first() }` (`GPSTrackerApplication.kt:44`), so a
+`CorruptionException` — or any `IOException` — from that file is an
+unhandled exception on the main thread during application startup. The app then
+fails to launch until its data is cleared, which also destroys the Tour Journal.
+
+A14 made this materially more likely rather than less: cloud backup and device
+transfer now restore the `datastore/` directory, so a file written by another
+device (or a half-finished restore) is a real input where before it could only
+be a local write interrupted by a kill.
+
+**Fix:** `ReplaceFileCorruptionHandler { emptyPreferences() }` on the DataStore,
+and `.catch` on the exposed flows emitting defaults, so a bad file costs the
+user their settings rather than the app.
+
+### B2 · One unguarded enum read can break every preference — `TODO`
+
+`userPreferencesFlow` maps the stored detail level with
+`UserPreferences.DetailLevel.valueOf(it)` (`UserPreferencesRepository.kt:98`).
+An unrecognized value throws `IllegalArgumentException` inside the `map`, which
+fails the flow for every collector — including `startTourMode`'s `.first()`, so
+the tour ends in `TourModeState.Error` and nothing explains why.
+
+It is the only unguarded read in the file. `parseCategories` skips unknown names
+with a comment about other app versions, `MapProvider.fromStorage`,
+`AccountTier.fromStorage` and `MapStyles.normalize` all sanitize. The
+convention exists; this site missed it.
+
+**Fix:** parse it like its neighbours — unknown value falls back to `MEDIUM`.
+
+### B3 · A new destination keeps the old destination marker — `TODO`
+
+Both map controllers refuse to move the marker once one exists
+(`MapLibreMapController.kt:262`, `GoogleMapController.kt:248` — `if
+(destinationMarker != null) return`), and only `stopNavigation` clears it
+(`MainActivity.kt:1478`). Choosing a new destination doesn't go through
+`stopNavigation`: `onDestinationSelected` cancels the job and calls
+`startActiveNavigation` directly. The route polyline *is* cleared per route
+version, so the map ends up showing the new route with the previous drive's
+destination pin still on it.
+
+**Fix:** clear the destination marker when a new destination is chosen, and let
+`showDestinationMarker` move an existing marker rather than ignoring the call.
+
+---
+
+## Tier 2 — silent failure
+
+### B4 · The `JSONException` sweep round 1 deferred — `TODO`
+
+Banked from A10. `PlacesApiService:232`, `GeocodingApiService:163`,
+`GooglePlacesApiService:214` and `GoogleGeocodingApiService:116` parse the
+response body inside a `try` that catches only `IOException`, so a truncated or
+unexpected body throws `JSONException` at the caller instead of failing as
+"empty". `RoutingApiService` and `GoogleRoutingApiService` have a broad catch,
+but only around an inner error-message parse — the route parse itself is
+outside it.
+
+`WikipediaApiService` and (since A10) `NearbyCityApiService` do it right, so the
+pattern to copy is already in the tree. Each caller handles failure
+differently, which is why this wants one deliberate pass rather than the
+drive-by A10 declined to make.
+
+### B5 · A failed tour leaves its geofences registered — `TODO`
+
+Banked from A4 and A7/A8. `stopTourMode` returns early unless
+`_serviceState.value.isRunning` (`TourModeService.kt:427`), and `Error` is not
+running. A tour that dies mid-flight — `startTourMode`'s catch sets `Error` and
+calls `stopSelf` — therefore skips every cleanup line below that guard:
+registered geofences, the location listener, the content queue and the session
+all survive the service. The geofence receiver then revives the service on the
+next crossing (A4's `GEOFENCE` command deliberately does that), so a broken tour
+comes back from the dead.
+
+**Fix:** separate "release the tour's resources" from "stop a running tour", and
+run the release unconditionally from `onDestroy` and the error path.
+
+---
+
+## Tier 3 — housekeeping
+
+### B6 · Lint's remaining warning groups — `TODO`
+
+Banked from A18. 78 warnings, no errors: 22 `UseTomlInstead` (hardcoded
+dependency coordinates that belong in the version catalog), 22
+`GradleDependency` and 11 `NewerVersionAvailable` (upgrades — these want release
+notes read, not numbers bumped), then small groups: 3 `UseKtx`, 3
+`UnusedResources`, 2 `Autofill`, 2 `NotifyDataSetChanged`, 2 `Overdraw`, 2
+`ButtonStyle`, and one each of `RtlEnabled`, `RelativeOverlap`, `ButtonOrder`,
+`UseCompoundDrawables`, `OldTargetApi`, `ObsoleteSdkInt`.
+
+**Fix:** the catalog move and the small groups are mechanical and worth doing;
+the dependency upgrades should be a separate deliberate pass.
+
+### B7 · The two biggest files kept growing — `TODO`
+
+`MainActivity` (1512 lines) now holds map camera work, the navigation UI state
+machine, service binding, ads, permissions, voice reporting and the tour
+lifecycle. `TourModeService` (1287) holds notifications, geofence and proximity
+handling, discovery, the way-of-life watcher and the delivery host.
+
+Round 1's repeated lesson was that logic is untestable because it sits inside an
+Android component, and these two are the largest remaining instances. A19's
+`Host`-interface seam worked cleanly for the delivery loop; the same shape fits
+the navigation UI state machine (`NavState`, the prompt gating, the camera
+decisions) and the service's discovery/notification split.
+
+**Fix:** not one change. The next candidates, in order of value: the way-of-life
+watcher (its policy is already pure, only the orchestration isn't), then the
+navigation status/instruction handling in `MainActivity`.
+
+---
+
+## Round 2 progress log
+
+Newest last.
+
+### Round 2 opened — audit recorded
+
+Read the map controllers, the UI sheets, the preferences layer, the Gemini and
+ads code, and re-read round 1's own changes. Found three new problems (B1–B3),
+confirmed the three findings round 1 banked (B4–B6), and recorded the file-size
+regression round 1 caused (B7). No code changes in this entry.
+
+Also checked and found *nothing* to report in: `GeminiApiService` (bounded
+timeout, catches broadly, validates its own output before speaking it),
+`ConsentManager` (defaults to non-personalized, every path calls back), and the
+four `!!` sites in the tree (three are the standard view-binding idiom, one is
+guarded by a `while (remaining.isNotEmpty())`).
