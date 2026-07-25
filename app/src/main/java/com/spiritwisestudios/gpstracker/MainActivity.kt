@@ -2,7 +2,6 @@ package com.spiritwisestudios.gpstracker
 
 import android.Manifest
 import android.content.ComponentName
-import android.content.Context
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.Configuration
@@ -152,6 +151,15 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     private var tourModeService: TourModeService? = null
     private var isTourModeActive = false
 
+    // Whether a binding has been requested, tracked separately from
+    // tourModeService: onServiceDisconnected clears the reference while the
+    // connection stays registered, and unbinding one twice throws.
+    private var isTourServiceBound = false
+
+    // The collectors watching the bound service. One set at a time — a
+    // rebind used to stack another set on top, all writing the same views.
+    private var tourServiceObserverJob: Job? = null
+
     // Tour mode UI elements
     private lateinit var fabTourMode: FloatingActionButton
     private lateinit var tourModeStatusCard: CardView
@@ -185,15 +193,16 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     // Service connection for binding to the TourModeService
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            val binder = service as TourModeService.TourModeServiceBinder
-            tourModeService = binder.getService()
+            val bound = (service as? TourModeService.TourModeServiceBinder)?.getService() ?: return
+            tourModeService = bound
 
             // Start observing service state changes
-            observeTourModeServiceState()
+            observeTourModeServiceState(bound)
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             tourModeService = null
+            stopObservingTourModeService()
             isTourModeActive = false
             updateTourModeUI(false)
         }
@@ -470,39 +479,37 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         })
     }
 
-    private fun observeTourModeServiceState() {
-        // Show a fact card while a POI is being narrated
-        lifecycleScope.launch {
-            tourModeService?.currentNarration?.collectLatest { narration ->
-                showNarrationCard(narration)
+    /**
+     * Mirror the bound service's state into the UI. Every flow here is a
+     * `StateFlow`, so a rebind after rotation replays the current narration
+     * and tour state instead of waiting for the next change.
+     */
+    private fun observeTourModeServiceState(service: TourModeService) {
+        stopObservingTourModeService()
+        tourServiceObserverJob = lifecycleScope.launch {
+            // Show a fact card while a POI is being narrated
+            launch {
+                service.currentNarration.collectLatest { narration ->
+                    showNarrationCard(narration)
+                }
             }
-        }
 
-        // Keep the fact card's play/pause button showing the action it
-        // would perform, in step with the notification's controls
-        lifecycleScope.launch {
-            tourModeService?.isNarrationPlaying?.collectLatest { playing ->
-                binding.btnNarrationPlayPause.setImageResource(
-                    if (playing) R.drawable.ic_pause else R.drawable.ic_play_arrow
-                )
+            // Keep the fact card's play/pause button showing the action it
+            // would perform, in step with the notification's controls
+            launch {
+                service.isNarrationPlaying.collectLatest { playing ->
+                    binding.btnNarrationPlayPause.setImageResource(
+                        if (playing) R.drawable.ic_pause else R.drawable.ic_play_arrow
+                    )
+                }
             }
-        }
 
-        // Observe the tour mode service state using lifecycleScope
-        lifecycleScope.launch {
-            tourModeService?.serviceState?.collectLatest { state ->
-                when (state) {
-                    is TourModeService.TourModeState.Active -> {
-                        isTourModeActive = true
-                        updateTourModeUI(true)
-                    }
-                    is TourModeService.TourModeState.Inactive -> {
-                        isTourModeActive = false
-                        updateTourModeUI(false)
-                    }
-                    is TourModeService.TourModeState.Error -> {
-                        isTourModeActive = false
-                        updateTourModeUI(false)
+            // The service is the authority on whether a tour is running
+            launch {
+                service.serviceState.collectLatest { state ->
+                    isTourModeActive = state.isRunning
+                    updateTourModeUI(state.isRunning)
+                    if (state is TourModeService.TourModeState.Error) {
                         Toast.makeText(
                             this@MainActivity,
                             getString(R.string.tour_mode_error, state.message),
@@ -512,6 +519,11 @@ class MainActivity : AppCompatActivity(), MapController.Host,
                 }
             }
         }
+    }
+
+    private fun stopObservingTourModeService() {
+        tourServiceObserverJob?.cancel()
+        tourServiceObserverJob = null
     }
 
     /**
@@ -649,14 +661,39 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         // Start and bind to the service
         Timber.d("Starting and binding TourModeService")
         startService(intent)
-        bindService(
-            Intent(this, TourModeService::class.java),
-            serviceConnection,
-            Context.BIND_AUTO_CREATE
-        )
+        bindTourService()
 
+        // Optimistic: the FAB has to answer the tap now, and the service
+        // reports Starting a moment later and owns the state from then on
         isTourModeActive = true
         updateTourModeUI(true)
+    }
+
+    /**
+     * Attach to a running tour, if there is one.
+     *
+     * Deliberately no `BIND_AUTO_CREATE`: this must observe a tour that is
+     * already under way, never conjure a service with no tour behind it. The
+     * connection is registered either way and connects as soon as the service
+     * exists, which is why the same call also works right after
+     * `startService()`.
+     */
+    private fun bindTourService() {
+        if (isTourServiceBound) return
+        // Set before binding: the connection is registered even when the
+        // bind fails, so it always needs the matching unbind
+        isTourServiceBound = true
+        if (!bindService(Intent(this, TourModeService::class.java), serviceConnection, 0)) {
+            Timber.d("No tour service to bind to yet")
+        }
+    }
+
+    private fun unbindTourService() {
+        if (!isTourServiceBound) return
+        unbindService(serviceConnection)
+        isTourServiceBound = false
+        tourModeService = null
+        stopObservingTourModeService()
     }
 
     private fun stopTourMode() {
@@ -666,14 +703,10 @@ class MainActivity : AppCompatActivity(), MapController.Host,
             action = AppConstants.ACTION_STOP_TOUR_MODE
         }
 
-        // Stop the service
+        // Stop the service. The binding follows the activity's lifecycle
+        // rather than the tour's, so it stays until onStop; the service
+        // publishes Inactive before it goes away.
         startService(intent)
-
-        // Unbind from the service
-        if (tourModeService != null) {
-            unbindService(serviceConnection)
-            tourModeService = null
-        }
 
         isTourModeActive = false
         updateTourModeUI(false)
@@ -922,6 +955,23 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     override fun onStart() {
         super.onStart()
         map.onStart()
+
+        // A tour that ended while we were unbound — stopped from the
+        // notification, or reclaimed by the system — had no way to say so,
+        // and binding can only ever bring good news. Clear first, then let
+        // the service correct us if it is still there.
+        if (isTourModeActive && !TourModeService.isAlive) {
+            isTourModeActive = false
+            updateTourModeUI(false)
+            showNarrationCard(null)
+        }
+
+        // Reattach to a tour that is already running. Rotation, the activity
+        // recreation a settings save triggers, and returning after the
+        // process was killed all arrive here with the guide still narrating;
+        // without this the fact card was gone and the FAB offered to start a
+        // tour that was already under way.
+        bindTourService()
     }
 
     // Stop location updates when the activity is paused to save battery
@@ -945,6 +995,10 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     override fun onStop() {
         super.onStop()
         map.onStop()
+
+        // The tour keeps running without us; onStart binds again and the
+        // service's state flows replay where it got to
+        unbindTourService()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -964,11 +1018,8 @@ class MainActivity : AppCompatActivity(), MapController.Host,
             navigationService.stopNavigation()
         }
 
-        // Unbind from the service if bound
-        if (tourModeService != null) {
-            unbindService(serviceConnection)
-            tourModeService = null
-        }
+        // Normally already done in onStop; guarded, so this is a no-op then
+        unbindTourService()
         bannerAdView?.destroy()
         bannerAdView = null
         map.onDestroy()

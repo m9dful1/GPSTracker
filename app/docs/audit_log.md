@@ -55,7 +55,7 @@ recursion.
 the `shutdown()` call; let the service (and process death) own the engine
 lifecycle.
 
-### A2 · Returning to the app shows the tour as off — `TODO`
+### A2 · Returning to the app shows the tour as off — `DONE`
 
 `bindService` only runs inside `launchTourService()` (`MainActivity.kt:652`);
 neither `onCreate` nor `onStart` re-binds. After a rotation, a process
@@ -330,3 +330,57 @@ guard.
 **For later tasks:** the recursion is still the delivery mechanism. A8
 (serialize delivery) should turn it into a loop rather than adding a third
 guard on top of `isDelivering` and the error count.
+
+### A2 — "Reattach the running tour when the activity comes back"
+
+The binding now follows the activity's lifecycle instead of the tour's:
+`bindTourService()` in `onStart`, `unbindTourService()` in `onStop` (and
+guarded in `onDestroy`). Binding uses **no `BIND_AUTO_CREATE`** on purpose —
+this has to observe a tour that is already running, never conjure a service
+with no tour behind it, which is exactly the zombie A4 is about. A
+non-auto-create connection is still registered when the service is absent and
+connects the moment it appears, so the same call serves `launchTourService()`
+right after `startService()`.
+
+Three things had to move with it:
+
+- **One set of collectors.** `observeTourModeServiceState()` used to launch
+  three `lifecycleScope` coroutines per connection and read the service
+  through a nullable field. It now takes the bound service and keeps its
+  collectors in `tourServiceObserverJob`, cancelled on rebind and on
+  disconnect. Rebinding on every `onStart` would otherwise have stacked a set
+  of collectors per resume, all writing the same views.
+- **The service is the authority.** `isTourModeActive` is assigned from
+  `serviceState.isRunning` rather than tracked in parallel. The tap still
+  flips the FAB optimistically — the service reports `Starting` a moment
+  later — but nothing else guesses.
+- **A `Starting` state.** Deriving the UI from `serviceState` alone made
+  things worse at first: the service only reached `Active` after settings
+  load, TTS init and the first POI discovery, so the state a fresh binding
+  replayed was `Inactive`, and the FAB flipped back to "start" for seconds
+  after the tap. `TourModeState.Starting` closes that gap, with
+  `isRunning` (`Starting || Active`) as the single question every caller asks
+  — the FAB, the geofence revival path in `onStartCommand`, and the start/stop
+  guards.
+
+Two bugs fell out of the `Starting` work. Stopping a tour *during* setup
+returned early (`!is Active`) and did nothing, so the guide carried on while
+the FAB read "start"; `stopTourMode()` now accepts `Starting` and cancels the
+tour's own coroutine, held in the new `tourJob`, so a cancelled start stops
+registering geofences. And `Active` is now only promoted *from* `Starting`, so
+a stop that lands mid-setup can't be undone by the tail of the start.
+
+The one hole binding can't cover: a tour stopped from the notification while
+the activity was unbound has nothing to call back into. `TourModeService.isAlive`
+(a `@Volatile` companion flag set in `onCreate`/`onDestroy`) is checked in
+`onStart` — if we think a tour is running and no service exists, clear the UI
+before binding and let the service correct us if it is there after all.
+
+Tests: 5 new cases in `TourModeStateTest` pinning `isRunning` for every state
+(272 total, 0 failures); debug and release both compile. The lifecycle wiring
+itself needs instrumentation to test — none was written for it.
+
+**For later tasks:** A4 should note that the fact card's play/pause and skip
+buttons `startService()` with a playback action, which will *create* the
+service if it is gone — the same zombie path as a `START_STICKY` revival, from
+a different direction.

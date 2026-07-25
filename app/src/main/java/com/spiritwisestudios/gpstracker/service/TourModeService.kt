@@ -94,6 +94,10 @@ class TourModeService : Service() {
     // Current POI being described
     private var currentPoi: PointOfInterest? = null
 
+    // The tour's own coroutine: settings, TTS, discovery and proximity
+    // monitoring all live in it, so cancelling it ends the tour
+    private var tourJob: Job? = null
+
     // Rolling discovery state
     private var refreshJob: Job? = null
     private var preferencesJob: Job? = null
@@ -141,6 +145,18 @@ class TourModeService : Service() {
         // the listener to look for the region a filler segment describes
         private const val WAY_OF_LIFE_CHECK_INTERVAL_MS = 30_000L
         private const val WAY_OF_LIFE_CITY_RADIUS_METERS = 30_000
+
+        /**
+         * Whether a service instance exists right now.
+         *
+         * A bound client hears everything, but an unbound one hears nothing:
+         * a tour ended from the notification while the UI was in the
+         * background has no way to report itself. Screens coming back check
+         * this before trusting the last state they saw.
+         */
+        @Volatile
+        var isAlive = false
+            private set
     }
 
     // Notification constants
@@ -153,6 +169,7 @@ class TourModeService : Service() {
     override fun onCreate() {
         super.onCreate()
         Timber.d("TourModeService created")
+        isAlive = true
         createNotificationChannel()
     }
 
@@ -180,7 +197,7 @@ class TourModeService : Service() {
 
                 // If we were revived by a geofence event, make sure tour mode
                 // is running (it loads the saved settings itself)
-                if (_serviceState.value !is TourModeState.Active) {
+                if (!_serviceState.value.isRunning) {
                     startTourMode()
                 }
 
@@ -203,6 +220,7 @@ class TourModeService : Service() {
     }
 
     override fun onDestroy() {
+        isAlive = false
         stopTourMode()
         serviceScope.cancel()
         super.onDestroy()
@@ -213,13 +231,18 @@ class TourModeService : Service() {
      * Start the tour mode.
      */
     fun startTourMode() {
-        if (_serviceState.value is TourModeState.Active) {
-            Timber.d("Tour mode already active")
+        if (_serviceState.value.isRunning) {
+            Timber.d("Tour mode already running")
             return
         }
 
+        // Announce the tour before any of the slow setup: clients bind to
+        // this state, and leaving it Inactive while the guide gets ready is
+        // what made a starting tour look like no tour at all
+        _serviceState.value = TourModeState.Starting
+
         // Start monitoring for POIs
-        serviceScope.launch {
+        tourJob = serviceScope.launch {
             try {
                 // The tour just started; quiet stretches are measured from
                 // here so filler never fires right out of the gate
@@ -261,8 +284,9 @@ class TourModeService : Service() {
                     }
                 }
 
-                // Update service state
-                if (_serviceState.value !is TourModeState.Active) {
+                // The guide is ready. Only promote from Starting: a stop
+                // request that landed during setup must not be undone here.
+                if (_serviceState.value is TourModeState.Starting) {
                     _serviceState.value = TourModeState.Active(emptyList())
                 }
 
@@ -293,9 +317,14 @@ class TourModeService : Service() {
      * Stop the tour mode.
      */
     fun stopTourMode() {
-        if (_serviceState.value !is TourModeState.Active) {
+        if (!_serviceState.value.isRunning) {
             return
         }
+
+        // Stop the tour's own coroutine too — stopping during setup used to
+        // leave it running, so a cancelled tour still registered geofences
+        tourJob?.cancel()
+        tourJob = null
 
         // Stop discovery, settings tracking, and proximity monitoring
         refreshJob?.cancel()
@@ -1157,7 +1186,23 @@ class TourModeService : Service() {
      */
     sealed class TourModeState {
         data object Inactive : TourModeState()
+
+        /**
+         * The start command was accepted but the tour isn't narrating yet:
+         * settings load, TTS init and the first POI discovery take seconds.
+         * A separate state from [Inactive] because the UI has to show a tour
+         * in progress through that gap.
+         */
+        data object Starting : TourModeState()
         data class Active(val nearbyPlaces: List<PointOfInterest>) : TourModeState()
         data class Error(val message: String) : TourModeState()
+
+        /**
+         * Whether a tour is under way — starting counts. Anything asking
+         * "is there a tour?" (the FAB, the geofence revival path, stop
+         * requests) means this, not `is Active`.
+         */
+        val isRunning: Boolean
+            get() = this is Starting || this is Active
     }
 }
