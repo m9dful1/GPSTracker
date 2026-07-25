@@ -72,6 +72,17 @@ class AudioServiceImpl @Inject constructor(
             if (textLength <= 0) return 0f
             return (charIndex.toFloat() / textLength).coerceIn(0f, 1f)
         }
+
+        /**
+         * Whether a `setLanguage` result means the engine can actually speak
+         * that language. Null means there was no engine to ask.
+         */
+        internal fun languageUsable(setLanguageResult: Int?): Boolean {
+            return setLanguageResult != null &&
+                setLanguageResult != TextToSpeech.LANG_MISSING_DATA &&
+                setLanguageResult != TextToSpeech.LANG_NOT_SUPPORTED &&
+                setLanguageResult != TextToSpeech.ERROR
+        }
     }
 
     private var textToSpeech: TextToSpeech? = null
@@ -85,6 +96,9 @@ class AudioServiceImpl @Inject constructor(
 
     private val _speechProgress = MutableStateFlow(0f)
     override val speechProgress: StateFlow<Float> = _speechProgress
+
+    private val _voiceAvailability = MutableStateFlow(AudioService.VoiceAvailability.UNKNOWN)
+    override val voiceAvailability: StateFlow<AudioService.VoiceAvailability> = _voiceAvailability
 
     // Audio Manager for handling audio focus
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -168,35 +182,65 @@ class AudioServiceImpl @Inject constructor(
 
         return suspendCancellableCoroutine { continuation ->
             textToSpeech = TextToSpeech(context) { status ->
-                if (status == TextToSpeech.SUCCESS) {
-                    // Set language
-                    val locale = Locale.forLanguageTag(userPreferences.voiceLanguage)
-                    val result = textToSpeech?.setLanguage(locale)
+                if (status != TextToSpeech.SUCCESS) {
+                    Timber.e("TextToSpeech initialization failed with status: $status")
+                    // Don't keep a half-built engine around: it can't speak,
+                    // and holding it leaks the connection to the TTS service
+                    discardEngine(AudioService.VoiceAvailability.ENGINE_UNAVAILABLE)
+                    continuation.resume(false)
+                    return@TextToSpeech
+                }
 
-                    if (result == TextToSpeech.LANG_MISSING_DATA ||
-                        result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                        Timber.e("Language not supported: ${userPreferences.voiceLanguage}")
-                        continuation.resume(false)
-                        return@TextToSpeech
+                // Prefer the requested language; a device without it can still
+                // guide in its own default voice, which is far better than a
+                // silent tour
+                val requested = Locale.forLanguageTag(userPreferences.voiceLanguage)
+                val availability = when {
+                    languageUsable(textToSpeech?.setLanguage(requested)) ->
+                        AudioService.VoiceAvailability.READY
+
+                    languageUsable(textToSpeech?.setLanguage(Locale.getDefault())) -> {
+                        Timber.w(
+                            "No voice for ${userPreferences.voiceLanguage}; " +
+                                "falling back to ${Locale.getDefault().toLanguageTag()}"
+                        )
+                        AudioService.VoiceAvailability.USING_DEFAULT_VOICE
                     }
 
-                    // Set speech rate and pitch
-                    textToSpeech?.setSpeechRate(userPreferences.voiceSpeed)
-                    textToSpeech?.setPitch(userPreferences.voicePitch)
-                    textToSpeech?.setOnUtteranceProgressListener(progressListener)
-
-                    isInitialized = true
-                    continuation.resume(true)
-                } else {
-                    Timber.e("TextToSpeech initialization failed with status: $status")
-                    continuation.resume(false)
+                    else -> {
+                        Timber.e("No usable voice data on this device")
+                        AudioService.VoiceAvailability.MISSING_VOICE_DATA
+                    }
                 }
+
+                if (!availability.canSpeak) {
+                    discardEngine(availability)
+                    continuation.resume(false)
+                    return@TextToSpeech
+                }
+
+                // Set speech rate and pitch
+                textToSpeech?.setSpeechRate(userPreferences.voiceSpeed)
+                textToSpeech?.setPitch(userPreferences.voicePitch)
+                textToSpeech?.setOnUtteranceProgressListener(progressListener)
+
+                isInitialized = true
+                _voiceAvailability.value = availability
+                continuation.resume(true)
             }
 
             continuation.invokeOnCancellation {
                 shutdown()
             }
         }
+    }
+
+    /** Release an engine that can't be used, and record why. */
+    private fun discardEngine(reason: AudioService.VoiceAvailability) {
+        textToSpeech?.shutdown()
+        textToSpeech = null
+        isInitialized = false
+        _voiceAvailability.value = reason
     }
 
     override fun speak(content: TourContent): Flow<AudioService.SpeakingStatus> {
@@ -300,9 +344,24 @@ class AudioServiceImpl @Inject constructor(
     override fun updateVoiceSettings(preferences: UserPreferences) {
         if (!isInitialized || textToSpeech == null) return
 
-        // Update language if needed
-        val locale = Locale.forLanguageTag(preferences.voiceLanguage)
-        textToSpeech?.setLanguage(locale)
+        // Update language if needed, falling back the same way initialization
+        // does — a language the device never had shouldn't mute a live tour
+        val requested = Locale.forLanguageTag(preferences.voiceLanguage)
+        _voiceAvailability.value = when {
+            languageUsable(textToSpeech?.setLanguage(requested)) ->
+                AudioService.VoiceAvailability.READY
+
+            languageUsable(textToSpeech?.setLanguage(Locale.getDefault())) ->
+                AudioService.VoiceAvailability.USING_DEFAULT_VOICE
+
+            else -> {
+                // A failed setLanguage leaves the engine on the voice it was
+                // already using, so the guide still speaks — just not in the
+                // language the user picked, which is what this reports.
+                Timber.w("No voice for ${preferences.voiceLanguage}; keeping the current voice")
+                AudioService.VoiceAvailability.USING_DEFAULT_VOICE
+            }
+        }
 
         // Update speech rate and pitch
         textToSpeech?.setSpeechRate(preferences.voiceSpeed)
@@ -311,9 +370,7 @@ class AudioServiceImpl @Inject constructor(
 
     override fun shutdown() {
         stop()
-        textToSpeech?.shutdown()
-        textToSpeech = null
-        isInitialized = false
+        discardEngine(AudioService.VoiceAvailability.UNKNOWN)
     }
 
     /**

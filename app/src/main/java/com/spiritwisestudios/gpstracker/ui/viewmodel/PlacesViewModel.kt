@@ -56,6 +56,9 @@ class PlacesViewModel @Inject constructor(
     // How far through the current narration the TTS engine is, 0..1
     val narrationProgress = audioService.speechProgress.asLiveData()
 
+    // Whether the guide has a voice at all, so the UI can explain silence
+    val voiceAvailability = audioService.voiceAvailability.asLiveData()
+
     // Tour content for the selected place
     private val _selectedPlaceContent = MutableLiveData<TourContent?>()
     val selectedPlaceContent: LiveData<TourContent?> = _selectedPlaceContent

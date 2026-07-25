@@ -147,7 +147,7 @@ through one coroutine fed by a channel. Fix together with A7 — same problem,
 and the per-tour state (`narrationTimes`, `narratedRegions`, `isDelivering`,
 plus whatever A5 adds) wants one owner, not four locks.
 
-### A9 · TTS initialization failure is discarded — `TODO`
+### A9 · TTS initialization failure is discarded — `DONE`
 
 `initialize()` returns `Boolean` and all three call sites ignore it
 (`TourModeService.kt:239`, `:244`, `PlacesViewModel.kt:77`). A device without
@@ -589,3 +589,46 @@ would have doubled the diff for no safety gained.
 geofences are never unregistered. It survived this rework because it is a
 state-machine question, not a shared-state one — it belongs with A19's tests
 around the service.
+
+### A9 — "Say why the guide has no voice"
+
+`initialize()` now does three things it didn't:
+
+- **Falls back to the device's default voice.** A device without the requested
+  language used to fail outright; it now retries with `Locale.getDefault()`,
+  because a guide speaking the wrong language is worth far more than a silent
+  one. The `setLanguage` result check moved into
+  `AudioServiceImpl.languageUsable`, which also catches the `ERROR` and
+  no-engine cases the old two-value check missed.
+- **Shuts down an engine it can't use.** The old `LANG_NOT_SUPPORTED` path
+  resumed `false` and walked away from a live `TextToSpeech` — a leaked
+  connection to the TTS service that never spoke a word.
+- **Reports what happened.** `AudioService.voiceAvailability` is a `StateFlow`
+  of `READY` / `USING_DEFAULT_VOICE` / `MISSING_VOICE_DATA` /
+  `ENGINE_UNAVAILABLE`, with `canSpeak` for the callers that only need the
+  yes-or-no. `updateVoiceSettings` keeps it honest when the language changes
+  mid-tour, and falls back the same way rather than muting a running tour.
+
+The UI reads that one flow through `PlacesViewModel`, so there is a single
+place explaining silence and no double-reporting. `MISSING_VOICE_DATA` — the
+one case the user can fix — gets a Snackbar with an **Install** action firing
+`ACTION_INSTALL_TTS_DATA` (guarded against no activity handling it); the other
+two get a plain explanation. Each state is announced once rather than on every
+re-emission.
+
+**A deliberate departure from the task's wording.** The task said to surface
+this as a tour-mode error, and I didn't: `TourModeState.Error` means *fatal*
+after A2 and A4 — `isRunning` is false for it, so the FAB would flip off, and
+`TourCommand.forAction` maps a stop request on a non-running tour to
+`NONE`, which would have broken the Stop button for the rest of the tour. A
+tour with no voice is silent, not over: the map, the journal, the fact cards
+and the notification all still work. So the voice problem got its own channel
+and the tour state was left alone. The service does use the return value now —
+it logs the silent start and skips the welcome announcement instead of
+speaking into a dead engine.
+
+Tests: 6 cases in `AudioServiceImplTest` (334 total, 0 failures) over
+`languageUsable` — every available result, both missing-voice results, the
+engine error, and no engine at all — plus `canSpeak` for each availability.
+The engine callback itself needs instrumentation; the decision it makes is
+what these cover.

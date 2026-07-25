@@ -12,6 +12,7 @@ import android.location.Location
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.speech.tts.TextToSpeech
 import android.text.method.ScrollingMovementMethod
 import android.view.View
 import android.view.ViewGroup
@@ -42,9 +43,11 @@ import com.spiritwisestudios.gpstracker.data.service.FrameworkLocationClient
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.model.MapProvider
 import com.google.android.material.floatingactionbutton.FloatingActionButton
+import com.google.android.material.snackbar.Snackbar
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.TourPlan
+import com.spiritwisestudios.gpstracker.domain.service.AudioService
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
 import com.spiritwisestudios.gpstracker.service.TourModeService
 import com.spiritwisestudios.gpstracker.ui.fragment.DestinationSearchBottomSheet
@@ -161,6 +164,9 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     // The collectors watching the bound service. One set at a time — a
     // rebind used to stack another set on top, all writing the same views.
     private var tourServiceObserverJob: Job? = null
+
+    // Voice problems are explained once per state, not on every re-emission
+    private var lastReportedVoiceAvailability: AudioService.VoiceAvailability? = null
 
     // Tour mode UI elements
     private lateinit var fabTourMode: FloatingActionButton
@@ -479,6 +485,58 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         placesViewModel.narrationProgress.observe(this, Observer { fraction ->
             binding.progressNarration.progress = (fraction * 100).toInt().coerceIn(0, 100)
         })
+
+        // A guide with no voice is silent, and silence with no explanation
+        // reads as a broken app
+        placesViewModel.voiceAvailability.observe(this, Observer { availability ->
+            reportVoiceAvailability(availability)
+        })
+    }
+
+    /**
+     * Explain a voice problem once per state. The missing-voice-data case is
+     * the one the user can fix, so it comes with the system's install action
+     * rather than just an apology.
+     */
+    private fun reportVoiceAvailability(availability: AudioService.VoiceAvailability) {
+        if (availability == lastReportedVoiceAvailability) return
+        lastReportedVoiceAvailability = availability
+
+        when (availability) {
+            AudioService.VoiceAvailability.MISSING_VOICE_DATA -> {
+                Snackbar.make(binding.root, getString(R.string.voice_missing_data), Snackbar.LENGTH_LONG)
+                    .setAction(R.string.voice_install) { installVoiceData() }
+                    .show()
+            }
+            AudioService.VoiceAvailability.ENGINE_UNAVAILABLE -> {
+                Snackbar.make(
+                    binding.root,
+                    getString(R.string.voice_engine_unavailable),
+                    Snackbar.LENGTH_LONG
+                ).show()
+            }
+            AudioService.VoiceAvailability.USING_DEFAULT_VOICE -> {
+                Snackbar.make(
+                    binding.root,
+                    getString(R.string.voice_using_default),
+                    Snackbar.LENGTH_LONG
+                ).show()
+            }
+            AudioService.VoiceAvailability.READY,
+            AudioService.VoiceAvailability.UNKNOWN -> {
+                // Nothing to explain
+            }
+        }
+    }
+
+    /** Hand the user off to the system's voice-data download. */
+    private fun installVoiceData() {
+        try {
+            startActivity(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA))
+        } catch (e: ActivityNotFoundException) {
+            Timber.w(e, "No activity handles ACTION_INSTALL_TTS_DATA")
+            Toast.makeText(this, getString(R.string.voice_settings_unavailable), Toast.LENGTH_LONG).show()
+        }
     }
 
     /**

@@ -294,8 +294,14 @@ class TourModeService : Service() {
                     }
                 }
 
-                // Initialize audio service
-                audioService.initialize(userPreferences)
+                // Initialize audio service. A device with no usable voice
+                // still gets a tour — the journal, the map and the fact cards
+                // all work — but there is no point speaking into the void, and
+                // the UI says so through audioService.voiceAvailability.
+                val canSpeak = audioService.initialize(userPreferences)
+                if (!canSpeak) {
+                    Timber.w("Starting a silent tour: ${audioService.voiceAvailability.value}")
+                }
 
                 // Fetch nearby places first
                 val currentLocation = locationAwarenessService.getCurrentLocation()
@@ -307,7 +313,7 @@ class TourModeService : Service() {
 
                 // Say hello: confirms audio works and sets expectations
                 // instead of silence until the first geofence fires
-                if (userPreferences.audioEnabled) {
+                if (userPreferences.audioEnabled && canSpeak) {
                     launch {
                         audioService.speak(TourLogic.tourStartAnnouncement(initialPlaces.size))
                             .collectLatest {}

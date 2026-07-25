@@ -16,6 +16,13 @@
     <string name="settings">Settings</string>
     <string name="tour_mode_error">Tour mode error: %1$s</string>
 
+    <!-- The guide's voice -->
+    <string name="voice_missing_data">No voice data is installed, so the guide can\'t speak</string>
+    <string name="voice_install">Install</string>
+    <string name="voice_engine_unavailable">Text-to-speech isn\'t available on this device, so the tour will be silent</string>
+    <string name="voice_using_default">The language you chose isn\'t installed — the guide will use your device\'s default voice</string>
+    <string name="voice_settings_unavailable">No text-to-speech settings screen to open</string>
+
     <!-- Narration fact card -->
     <string name="narration_source_wikipedia">From Wikipedia — read the full article</string>
     <string name="narration_tap_for_details">Tap for details</string>

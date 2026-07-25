@@ -19,10 +19,18 @@ interface AudioService {
     val speechProgress: StateFlow<Float>
 
     /**
+     * Whether the guide can actually speak, and in which voice. The single
+     * source of truth: a tour with no working voice is silent, and silence
+     * with no explanation is indistinguishable from a broken app.
+     */
+    val voiceAvailability: StateFlow<VoiceAvailability>
+
+    /**
      * Initialize the text-to-speech engine.
-     * 
+     *
      * @param userPreferences User preferences for voice settings
-     * @return True if initialization was successful
+     * @return True if the engine can speak (see [voiceAvailability] for what
+     *   it will sound like, and why not, when it can't)
      */
     suspend fun initialize(userPreferences: UserPreferences): Boolean
     
@@ -99,5 +107,37 @@ interface AudioService {
         PAUSED,
         COMPLETED,
         ERROR
+    }
+
+    /**
+     * Whether there is a usable voice, and what the user should know about it.
+     */
+    enum class VoiceAvailability {
+        /** Nothing has tried to speak yet. */
+        UNKNOWN,
+
+        /** Speaking in the requested language. */
+        READY,
+
+        /**
+         * Speaking, but the requested language wasn't installed, so this is
+         * the device's default voice. Worth telling the user: they chose a
+         * language and are not getting it.
+         */
+        USING_DEFAULT_VOICE,
+
+        /**
+         * The engine works but has no voice data to speak with. Recoverable
+         * by the user — this is the case worth offering to fix, through
+         * [android.speech.tts.TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA].
+         */
+        MISSING_VOICE_DATA,
+
+        /** No text-to-speech engine started at all. */
+        ENGINE_UNAVAILABLE;
+
+        /** Whether the guide can speak at all. */
+        val canSpeak: Boolean
+            get() = this == READY || this == USING_DEFAULT_VOICE
     }
 } 
