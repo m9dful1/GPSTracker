@@ -103,4 +103,47 @@ class TourPlanLogicTest {
 
         assertEquals(listOf("Near", "Mid", "Far"), ordered.map { it.name })
     }
+
+    // --- corridorPlaces ---
+
+    @Test
+    fun `the tour's own stops are watched before anything discovered`() {
+        // Order is the fix: corridor discovery caps how much it returns, so a
+        // planned stop listed after it could be the one that gets cut.
+        val chosen = listOf(poi("Chosen A", "CULTURAL"), poi("Chosen B", "HISTORICAL"))
+        val found = listOf(poi("Found 1", "DINING"), poi("Found 2", "SHOPPING"))
+
+        val watched = TourPlanLogic.corridorPlaces(chosen, found)
+
+        assertEquals(
+            listOf("Chosen A", "Chosen B", "Found 1", "Found 2"),
+            watched.map { it.name }
+        )
+    }
+
+    @Test
+    fun `a stop discovery also found is listed once, as the chosen one`() {
+        val chosen = poi("Old Mill", "HISTORICAL")
+        // Same place id, arrived at through corridor discovery
+        val alsoFound = poi("Old Mill", "HISTORICAL").copy(id = "corridor-row")
+
+        val watched = TourPlanLogic.corridorPlaces(listOf(chosen), listOf(alsoFound))
+
+        assertEquals(1, watched.size)
+        assertEquals(chosen.id, watched.single().id)
+    }
+
+    @Test
+    fun `an ordinary drive watches only what was discovered`() {
+        val found = listOf(poi("Found 1", "DINING"), poi("Found 2", "SHOPPING"))
+
+        assertEquals(found, TourPlanLogic.corridorPlaces(emptyList(), found))
+    }
+
+    @Test
+    fun `a tour whose corridor turned up nothing still watches its stops`() {
+        val chosen = listOf(poi("Chosen", "CULTURAL"))
+
+        assertEquals(chosen, TourPlanLogic.corridorPlaces(chosen, emptyList()))
+    }
 }

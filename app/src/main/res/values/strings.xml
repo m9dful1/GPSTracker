@@ -29,6 +29,16 @@
     <string name="clear_story_cache">Clear cached stories</string>
     <string name="story_cache_cleared">Cached stories cleared</string>
 
+    <!-- Notification channels -->
+    <string name="channel_service_name">Tour Mode Service</string>
+    <string name="channel_service_description">Shows the status of the tour guide service</string>
+    <string name="channel_approaching_name">Approaching Points of Interest</string>
+    <string name="channel_approaching_description">Notifies you when approaching interesting places</string>
+    <string name="channel_arrived_name">Arrived at Points of Interest</string>
+    <string name="channel_arrived_description">Notifies you when you\'ve arrived at interesting places</string>
+    <string name="channel_playback_name">Audio Playback Controls</string>
+    <string name="channel_playback_description">Controls for audio narration playback</string>
+
     <!-- Narration fact card -->
     <string name="narration_source_wikipedia">From Wikipedia — read the full article</string>
     <string name="narration_tap_for_details">Tap for details</string>

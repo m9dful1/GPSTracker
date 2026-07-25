@@ -101,4 +101,20 @@ object TourPlanLogic {
         }
         return ordered
     }
+
+    /**
+     * The places to watch along a drive: the tour's own stops first, then
+     * whatever discovery found in the corridor around the route.
+     *
+     * Order is the point. Corridor discovery caps how much it returns, so a
+     * planned stop listed after it could be the one that gets cut — and a
+     * place the user chose is the reason the drive exists. Duplicates keep the
+     * planned copy, matched on the provider's place id where there is one.
+     */
+    fun corridorPlaces(
+        plannedStops: List<PointOfInterest>,
+        discovered: List<PointOfInterest>
+    ): List<PointOfInterest> {
+        return (plannedStops + discovered).distinctBy { it.placeId ?: it.id }
+    }
 }

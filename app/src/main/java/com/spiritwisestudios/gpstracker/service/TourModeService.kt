@@ -27,6 +27,7 @@ import com.spiritwisestudios.gpstracker.util.AppConstants
 import com.spiritwisestudios.gpstracker.util.GeoUtils
 import com.spiritwisestudios.gpstracker.util.TourCommand
 import com.spiritwisestudios.gpstracker.util.TourLogic
+import com.spiritwisestudios.gpstracker.util.TourPlanLogic
 import com.spiritwisestudios.gpstracker.util.TourSession
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -85,10 +86,17 @@ class TourModeService : Service() {
     private val _currentNarration = MutableStateFlow<Narration?>(null)
     val currentNarration: StateFlow<Narration?> = _currentNarration
 
-    // Whether the current narration is audibly playing (false = paused).
-    // Lets the in-app fact card mirror the notification's play/pause state.
-    private val _isNarrationPlaying = MutableStateFlow(true)
-    val isNarrationPlaying: StateFlow<Boolean> = _isNarrationPlaying
+    /**
+     * Whether the narration is audibly playing (false = paused), for the fact
+     * card's play/pause button.
+     *
+     * Straight from the audio service rather than tracked here: playback also
+     * pauses without anyone pressing anything — a phone call takes audio focus
+     * — and a flag maintained around the button presses showed the wrong icon
+     * for the rest of the tour.
+     */
+    val isNarrationPlaying: StateFlow<Boolean>
+        get() = audioService.isPlaying
 
     // Current user preferences
     private var userPreferences: UserPreferences = UserPreferences()
@@ -151,7 +159,6 @@ class TourModeService : Service() {
                 upNextTitle = upNextTitle(),
                 sourceUrl = content.metadata["sourceUrl"]
             )
-            _isNarrationPlaying.value = true
         }
 
         override fun onNothingNarrating() {
@@ -472,7 +479,11 @@ class TourModeService : Service() {
      * [tourName] is set when the drive is a planned Take a Tour loop, so
      * the guide can open with a proper welcome.
      */
-    fun updateRouteCorridor(route: List<LatLng>, tourName: String? = null) {
+    fun updateRouteCorridor(
+        route: List<LatLng>,
+        tourName: String? = null,
+        plannedStops: List<PointOfInterest> = emptyList()
+    ) {
         if (route.isEmpty()) return
 
         serviceScope.launch {
@@ -486,8 +497,16 @@ class TourModeService : Service() {
                     tripHighlightScore = -1
                 }
                 routeCorridorActive = true
-                val places = placesRepository.getPlacesAlongRoute(route, DISCOVERY_RADIUS_METERS / 3)
-                Timber.d("Route corridor: found ${places.size} places along route")
+                val discovered = placesRepository.getPlacesAlongRoute(route, DISCOVERY_RADIUS_METERS / 3)
+
+                // A planned tour's stops are the reason for the drive, so they
+                // go first: corridor discovery caps itself, and a place the
+                // user chose must never be the one that gets cut.
+                val places = TourPlanLogic.corridorPlaces(plannedStops, discovered)
+                Timber.d(
+                    "Route corridor: ${plannedStops.size} planned stops plus " +
+                        "${discovered.size} found along the route, ${places.size} after dedup"
+                )
 
                 // The corridor replaces whatever was registered before
                 locationAwarenessService.unregisterAllPointsOfInterest()
@@ -939,7 +958,6 @@ class TourModeService : Service() {
             upNextTitle = null,
             sourceUrl = content.metadata["sourceUrl"]
         )
-        _isNarrationPlaying.value = true
 
         audioService.speak("${TourLogic.wayOfLifeIntro(region.name)} ${content.content}")
             .collectLatest { status ->
@@ -1034,10 +1052,10 @@ class TourModeService : Service() {
             // Service channel (for ongoing service status)
             val serviceChannel = NotificationChannel(
                 NOTIFICATION_CHANNEL_SERVICE,
-                "Tour Mode Service",
+                getString(R.string.channel_service_name),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows the status of the tour guide service"
+                description = getString(R.string.channel_service_description)
                 setShowBadge(false)
                 enableLights(false)
                 enableVibration(false)
@@ -1046,10 +1064,10 @@ class TourModeService : Service() {
             // Approaching POI channel (for when approaching a POI)
             val approachingChannel = NotificationChannel(
                 NOTIFICATION_CHANNEL_POI_APPROACHING,
-                "Approaching Points of Interest",
+                getString(R.string.channel_approaching_name),
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = "Notifies you when approaching interesting places"
+                description = getString(R.string.channel_approaching_description)
                 setShowBadge(true)
                 enableLights(true)
                 lightColor = android.graphics.Color.BLUE
@@ -1060,10 +1078,10 @@ class TourModeService : Service() {
             // Arrived at POI channel (for when arrived at a POI)
             val arrivedChannel = NotificationChannel(
                 NOTIFICATION_CHANNEL_POI_ARRIVED,
-                "Arrived at Points of Interest",
+                getString(R.string.channel_arrived_name),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Notifies you when you've arrived at interesting places"
+                description = getString(R.string.channel_arrived_description)
                 setShowBadge(true)
                 enableLights(true)
                 lightColor = android.graphics.Color.GREEN
@@ -1074,10 +1092,10 @@ class TourModeService : Service() {
             // Playback control channel (for audio playback controls)
             val playbackChannel = NotificationChannel(
                 NOTIFICATION_CHANNEL_PLAYBACK,
-                "Audio Playback Controls",
+                getString(R.string.channel_playback_name),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Controls for audio narration playback"
+                description = getString(R.string.channel_playback_description)
                 setShowBadge(false)
                 enableLights(false)
                 enableVibration(false)
@@ -1187,7 +1205,6 @@ class TourModeService : Service() {
         serviceScope.launch {
             if (audioService.isSpeaking()) {
                 audioService.pause()
-                _isNarrationPlaying.value = false
                 updateNotification(
                     "Audio Paused",
                     "Paused narration for ${currentPoi?.name ?: "Unknown location"}",
@@ -1195,7 +1212,6 @@ class TourModeService : Service() {
                 )
             } else {
                 audioService.resume()
-                _isNarrationPlaying.value = true
                 val poiName = currentPoi?.name ?: "Unknown location"
                 updateNotification(
                     "Playing Audio",

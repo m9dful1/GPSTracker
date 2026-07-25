@@ -101,6 +101,7 @@ class NarrationDeliveryTest {
         override val speechProgress: StateFlow<Float> = MutableStateFlow(0f)
         override val voiceAvailability: StateFlow<AudioService.VoiceAvailability> =
             MutableStateFlow(AudioService.VoiceAvailability.READY)
+        override val isPlaying: StateFlow<Boolean> = MutableStateFlow(false)
 
         override suspend fun initialize(userPreferences: UserPreferences): Boolean = true
         override fun speak(content: TourContent): Flow<AudioService.SpeakingStatus> =

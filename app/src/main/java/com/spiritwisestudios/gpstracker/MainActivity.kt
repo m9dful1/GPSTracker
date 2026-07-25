@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.speech.tts.TextToSpeech
+import android.text.format.DateFormat
 import android.text.method.ScrollingMovementMethod
 import android.view.View
 import android.view.ViewGroup
@@ -71,9 +72,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import timber.log.Timber
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import com.spiritwisestudios.gpstracker.util.GeoUtils
@@ -197,6 +196,10 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     // Name of the planned tour being driven, if any — the tour guide opens
     // a named tour with a welcome instead of the generic route preview
     private var activeTourName: String? = null
+
+    // And its curated stops, handed to the guide so corridor discovery can't
+    // crowd out a place the user picked
+    private var activeTourStops: List<PointOfInterest> = emptyList()
 
     // Service connection for binding to the TourModeService
     private val serviceConnection = object : ServiceConnection {
@@ -1113,6 +1116,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     // DestinationSearchHost: a search result was picked — preview the route
     override fun onDestinationSelected(name: String, latLng: LatLng) {
         activeTourName = null // an ordinary drive, not a planned tour
+        activeTourStops = emptyList()
         navigationJob?.cancel()
         navigationJob = lifecycleScope.launch {
             startActiveNavigation(latLng, name)
@@ -1131,6 +1135,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
             startTourMode()
         }
         activeTourName = plan.name // the guide opens with a tour welcome
+        activeTourStops = plan.stops
         navigationJob?.cancel()
         navigationJob = lifecycleScope.launch {
             startActiveNavigation(plan.destination, plan.name, plan.stops.map { it.latLng })
@@ -1176,7 +1181,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
                     if (route.isNotEmpty()) {
                         map.clearRoutePolyline()
                         if (navState == NavState.GUIDING) {
-                            tourModeService?.updateRouteCorridor(route, activeTourName)
+                            tourModeService?.updateRouteCorridor(route, activeTourName, activeTourStops)
                         }
                         corridorRouteVersion = status.routeVersion
                     }
@@ -1213,7 +1218,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         lifecycleScope.launch {
             val route = navigationService.getCurrentRoute()
             if (route.isNotEmpty()) {
-                tourModeService?.updateRouteCorridor(route, activeTourName)
+                tourModeService?.updateRouteCorridor(route, activeTourName, activeTourStops)
             }
         }
     }
@@ -1326,7 +1331,8 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         val etaText = if (status.timeRemaining > 0) {
             val minutes = TimeUnit.MILLISECONDS.toMinutes(status.timeRemaining)
             val arrivalTime = Date(System.currentTimeMillis() + status.timeRemaining)
-            val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+            // The device's own clock format, 12- or 24-hour as the user set it
+            val timeFormat = DateFormat.getTimeFormat(this)
 
             if (minutes < 60) {
                 getString(R.string.eta_format, "$minutes min (${timeFormat.format(arrivalTime)})")
@@ -1477,6 +1483,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         // Back to discovering POIs around the current position
         tourModeService?.clearRouteCorridor()
         activeTourName = null
+        activeTourStops = emptyList()
 
         // Clear location history and announcement state
         locationHistory.clear()

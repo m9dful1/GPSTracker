@@ -100,6 +100,18 @@ class AudioServiceImpl @Inject constructor(
     private val _voiceAvailability = MutableStateFlow(AudioService.VoiceAvailability.UNKNOWN)
     override val voiceAvailability: StateFlow<AudioService.VoiceAvailability> = _voiceAvailability
 
+    private val _isPlaying = MutableStateFlow(false)
+    override val isPlaying: StateFlow<Boolean> = _isPlaying
+
+    /**
+     * Republish whether anything is audibly playing. Called after every
+     * transition — including the ones that come from outside, like audio focus
+     * being taken by a phone call — so nothing has to infer it.
+     */
+    private fun publishPlaying() {
+        _isPlaying.value = synchronized(lock) { current != null && !isPaused }
+    }
+
     // Audio Manager for handling audio focus
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -302,6 +314,7 @@ class AudioServiceImpl @Inject constructor(
             active.channel?.trySend(AudioService.SpeakingStatus.PAUSED)
         }
         textToSpeech?.stop()
+        publishPlaying()
         return true
     }
 
@@ -316,6 +329,7 @@ class AudioServiceImpl @Inject constructor(
                 pendingResume = toResume
                 isPaused = true
             }
+            publishPlaying()
             return false
         }
 
@@ -335,6 +349,7 @@ class AudioServiceImpl @Inject constructor(
         _speechProgress.value = 0f
         textToSpeech?.stop()
         releaseAudioFocus()
+        publishPlaying()
     }
 
     override fun isSpeaking(): Boolean {
@@ -400,6 +415,7 @@ class AudioServiceImpl @Inject constructor(
             channel?.close()
             releaseAudioFocus()
         }
+        publishPlaying()
     }
 
     private fun handleUtteranceFinished(utteranceId: String, error: Boolean) {
@@ -416,6 +432,8 @@ class AudioServiceImpl @Inject constructor(
                 pendingResume = null
             }
         }
+
+        publishPlaying()
 
         if (!finished.isPrompt) {
             _speechProgress.value = if (error) 0f else 1f
@@ -453,6 +471,7 @@ class AudioServiceImpl @Inject constructor(
             textToSpeech?.stop()
             releaseAudioFocus()
         }
+        publishPlaying()
     }
 
     /**

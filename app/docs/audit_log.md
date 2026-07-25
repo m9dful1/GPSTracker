@@ -274,7 +274,7 @@ and shrinking.
 `AudioService`, `LocationAwarenessService`) so A5, A7, A8 and A10 are covered
 by tests rather than reasoning.
 
-### A20 · Smaller polish — `TODO`
+### A20 · Smaller polish — `DONE`
 
 - `_isNarrationPlaying` is not updated when audio focus pauses playback
   (`AudioServiceImpl.kt:102` vs `TourModeService.kt:88`), so the fact card's
@@ -996,3 +996,52 @@ covered in `TourLogicTest`, its orchestration isn't), the geofence and proximity
 handlers, and `startTourMode`/`stopTourMode`. Those are Android lifecycle and
 notification work; the same `Host`-style seam would extract them, but each is a
 smaller behaviour than the delivery loop and none of them held a Tier 1 bug.
+
+### A20 — "Four small lies the app told"
+
+**The play/pause button.** `_isNarrationPlaying` was maintained around the
+button presses, so anything that paused playback without a press — a phone call
+taking audio focus, which is the common case — left the icon wrong for the rest
+of the tour. `AudioService` now publishes `isPlaying` (an utterance in progress
+and not paused), republished from a single `publishPlaying()` after every
+transition including the audio-focus ones, and the service exposes it straight
+through instead of tracking a copy. Three manual writes went away with it.
+
+**Notification channels** read from `strings.xml` like the rest of the UI —
+four names and four descriptions that were hardcoded English inside the
+service.
+
+**The ETA clock** used `SimpleDateFormat("HH:mm")`, so a phone set to 12-hour
+time was told its arrival in 24-hour. It uses `DateFormat.getTimeFormat(this)`
+now, which is the platform's answer to that question.
+
+**A planned tour's stops can no longer be crowded out.** The corridor
+registration re-discovered places along the route and capped that discovery at
+60, so on a long tour a stop the *user had chosen* could be dropped in favour of
+whatever discovery happened to return. `updateRouteCorridor` now takes the
+plan's stops and lists them first, through
+`TourPlanLogic.corridorPlaces` — the tour's own places are the reason the drive
+exists, and discovery is the extra. `MainActivity` holds the active tour's stops
+beside its name and clears both together.
+
+Tests: 4 cases in `TourPlanLogicTest` (382 total, 0 failures) — chosen stops
+first, a stop that discovery also found listed once as the chosen copy, an
+ordinary drive with no stops, and a tour whose corridor turned up nothing. The
+other three items are framework plumbing (a `StateFlow` published under a lock,
+resource lookups, a platform formatter) and are not unit-testable here; the
+`isPlaying` transitions in particular want instrumentation.
+
+---
+
+## Round 1 complete
+
+All twenty tasks `DONE`. From the baseline: **264 tests → 382**, `lintDebug`
+from failing to clean, no CI to a workflow that builds debug, tests, lints and
+runs R8 over a release build. Nine of the twenty produced a new pure class in
+`util/` or `service/` — the recurring lesson being that the logic was untestable
+because it sat inside an Android component, not because it was complicated.
+
+Three findings were banked along the way for the next round rather than fixed
+out of scope: the `JSONException` sweep across six API services (A10), the
+`Error`-state geofence leak (A4, A7/A8), and the lint warning groups A18
+deferred.

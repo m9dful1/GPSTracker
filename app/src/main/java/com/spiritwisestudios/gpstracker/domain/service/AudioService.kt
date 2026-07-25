@@ -26,6 +26,17 @@ interface AudioService {
     val voiceAvailability: StateFlow<VoiceAvailability>
 
     /**
+     * Whether something is being spoken *right now* — an utterance in
+     * progress and not paused.
+     *
+     * Published rather than asked for, because playback also stops and starts
+     * without anyone calling this service: a phone call takes audio focus and
+     * pauses the guide, and a play/pause button that only tracked the button
+     * presses then showed the wrong one.
+     */
+    val isPlaying: StateFlow<Boolean>
+
+    /**
      * Initialize the text-to-speech engine.
      *
      * @param userPreferences User preferences for voice settings
