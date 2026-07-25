@@ -1,19 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+    What leaves this device, on Android 12+ (API 31 and above).
+
+    The Tour Journal is the user's own history — the places the guide has
+    narrated, when, and any notes they wrote — so it is carried to a new phone
+    deliberately, along with their settings. Everything not listed here stays
+    behind, which is the point of listing: the story cache in the same database
+    is regenerable, and consent state is per-device and better re-collected than
+    restored.
+
+    The database is deliberately journal-mode TRUNCATE (see AppDatabase) so it
+    is a single file: a .db restored without the write-ahead log it was written
+    with would be missing whatever the log still held.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- Tour journal, visited places, cached stories -->
+        <include
+            domain="database"
+            path="gpstracker_database" />
+        <!-- Voice, tour and map preferences (DataStore) -->
+        <include
+            domain="file"
+            path="datastore" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <include
+            domain="database"
+            path="gpstracker_database" />
+        <include
+            domain="file"
+            path="datastore" />
     </device-transfer>
-    -->
 </data-extraction-rules>

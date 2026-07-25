@@ -215,7 +215,7 @@ the real duration on each recalculation.
 
 ## Tier 4 — data safety and completeness
 
-### A14 · Schema changes will delete the user's journal — `TODO`
+### A14 · Schema changes will delete the user's journal — `DONE`
 
 `fallbackToDestructiveMigration()` (`AppDatabase.kt:37`) plus
 `android:allowBackup="true"` with no `dataExtractionRules`. The Tour Journal
@@ -766,3 +766,41 @@ Tests: 6 new cases in `RouteProgressTest` (358 total, 0 failures) — the route
 half driven, nothing left at the end, the planner's duration scaling by
 distance, a full route keeping its full duration, arriving at zero, and the
 fallback when no duration was priced.
+
+### A14 — "Carry the journal across schema changes"
+
+**Migrations.** `fallbackToDestructiveMigration()` is gone. `exportSchema` is
+on, `ksp` writes the schemas to `app/schemas`, and `2.json` is committed — that
+file is the record a future migration migrates *from*, and its absence is why
+this couldn't be fixed by writing migrations alone. `AppMigrations.ALL` is where
+they go, empty today because version 2 is current, and
+`fallbackToDestructiveMigrationFrom(1)` keeps exactly one exception: version 1
+predates schema export, so there is no shape to carry forward. Every version
+from 2 on must migrate or the open fails loudly.
+
+`AppMigrationsTest` is the guard that makes this stick: it fails when
+`AppDatabase.VERSION` outruns the migration chain, when the chain has a gap,
+when a migration doesn't move forward, or when one claims to start before
+version 2. Bumping the version without writing the migration is now a red build
+instead of a wiped journal on somebody's next update.
+
+**Backups.** Both `res/xml` rule files existed as untouched IDE templates and
+neither was referenced from the manifest, so `allowBackup="true"` meant the
+platform default: back up everything, decided by nobody. They are wired up now
+and say what travels — the database (journal, visited places, notes) and the
+DataStore preferences — and by listing those, everything else stays behind.
+Consent state is deliberately not restored: it is per-device and better
+re-collected than inherited.
+
+**The journal mode was the catch.** A `.db` restored without the write-ahead log
+it was written with is missing whatever that log still held, so backing up a WAL
+database is backing up a maybe. The database is `JournalMode.TRUNCATE` now — one
+file, nothing outside it. The cost is writer/reader concurrency this app has no
+use for: it writes a handful of rows per drive.
+
+Tests: 4 new cases in `AppMigrationsTest` (362 total, 0 failures).
+
+**Not done here:** a migration that actually runs against a real old database
+needs `MigrationTestHelper` and an instrumented test, which this project has no
+harness for (`ExampleInstrumentedTest` is the only one, and A16 deletes it).
+The exported schema is the prerequisite for writing those, and it now exists.

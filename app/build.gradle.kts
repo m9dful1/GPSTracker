@@ -88,6 +88,13 @@ android {
     }
 }
 
+// Room writes the schema of every version here, and the files are committed.
+// Without that record a later migration has nothing to migrate *from*, which
+// is how a schema change ends up destroying the user's journal.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     // Core Android dependencies
     implementation(libs.androidx.core.ktx)

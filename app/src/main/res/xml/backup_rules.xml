@@ -1,13 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older that API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+    The same decision as data_extraction_rules.xml, for Android 11 and below
+    (API 30 and under), which uses this older format instead.
+
+    Keep the two in step: the journal and the user's settings travel, nothing
+    else does.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- Tour journal, visited places, cached stories -->
+    <include
+        domain="database"
+        path="gpstracker_database" />
+    <!-- Voice, tour and map preferences (DataStore) -->
+    <include
+        domain="file"
+        path="datastore" />
 </full-backup-content>

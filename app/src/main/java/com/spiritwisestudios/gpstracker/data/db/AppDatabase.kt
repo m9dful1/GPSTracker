@@ -13,8 +13,8 @@ import com.spiritwisestudios.gpstracker.data.db.entity.TourContentEntity
 
 @Database(
     entities = [PointOfInterestEntity::class, TourContentEntity::class],
-    version = 2,
-    exportSchema = false
+    version = AppDatabase.VERSION,
+    exportSchema = true
 )
 @TypeConverters(LatLngConverter::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -24,6 +24,15 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun tourContentDao(): TourContentDao
 
     companion object {
+        /**
+         * Bumping this requires a matching migration in [AppMigrations] — the
+         * journal is the user's own history, and `AppMigrationsTest` fails the
+         * build rather than let a schema change quietly discard it.
+         */
+        const val VERSION = 2
+
+        const val NAME = "gpstracker_database"
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -32,9 +41,21 @@ abstract class AppDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "gpstracker_database"
+                    NAME
                 )
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(*AppMigrations.ALL)
+                    // Version 1 predates schema export, so there is no record
+                    // of its shape to migrate from — it is the only version
+                    // allowed to be rebuilt. Every later one must migrate, and
+                    // a missing migration now fails loudly instead of silently
+                    // deleting the journal.
+                    .fallbackToDestructiveMigrationFrom(1)
+                    // One file, no write-ahead log: this database is backed up
+                    // and restored (see res/xml/data_extraction_rules.xml), and
+                    // a .db copied without its -wal loses whatever the log
+                    // still held. The app writes a handful of rows per drive,
+                    // so WAL's concurrency buys it nothing.
+                    .setJournalMode(JournalMode.TRUNCATE)
                     .build()
                 INSTANCE = instance
                 instance
