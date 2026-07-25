@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONException
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.IOException
@@ -95,6 +96,13 @@ class NearbyCityApiService(
             }
         } catch (e: IOException) {
             Timber.e(e, "Nearby cities query failed")
+            emptyList()
+        } catch (e: JSONException) {
+            // A truncated or unexpected body is a failed lookup, not an
+            // exception for the caller to handle: this returns "empty on
+            // failure", and a JSONException escaping meant the way-of-life
+            // watcher logged a mystery error and retried 30 seconds later.
+            Timber.e(e, "Nearby cities response could not be parsed")
             emptyList()
         }
     }

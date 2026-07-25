@@ -160,7 +160,7 @@ completely silent tour with no explanation.
 tour-mode error (and an `ACTION_INSTALL_TTS_DATA` prompt), and shut down the
 engine that failed to initialize.
 
-### A10 · Way-of-life filler hammers Overpass on empty roads — `TODO`
+### A10 · Way-of-life filler hammers Overpass on empty roads — `DONE`
 
 When `nearbyCities` returns empty — rural highway, or a rate-limited or
 failed request — `maybePlayWayOfLife` returns without stamping
@@ -632,3 +632,42 @@ Tests: 6 cases in `AudioServiceImplTest` (334 total, 0 failures) over
 engine error, and no engine at all — plus `canSpeak` for each availability.
 The engine callback itself needs instrumentation; the decision it makes is
 what these cover.
+
+### A10 — "Back off when there's nothing to say about where you are"
+
+My own bug, from `39d6d35`. Every path out of `maybePlayWayOfLife` stamped
+`lastWayOfLifeAt` except the one that mattered: an empty region lookup just
+returned, so the 30-second watcher POSTed to the public Overpass instance again
+on the next tick, and the next, for the rest of the drive. The emptiest roads
+are exactly what the feature exists for, so the failure case was the common
+case.
+
+Now an empty result stamps the cooldown and counts itself.
+`TourLogic.wayOfLifeCooldownMs` doubles the wait per consecutive empty lookup
+from the ordinary 10 minutes, capped at an hour, and `shouldPlayWayOfLife`
+takes the cooldown as a parameter (defaulted, so the existing call sites and
+tests are unchanged). A rural highway goes from 120 requests an hour to at
+most 6. The counter resets the moment a lookup finds a region, and on tour
+stop. Empty and rate-limited are deliberately treated the same — `nearbyCities`
+returns an empty list either way, and both deserve the same answer: ask less
+often.
+
+`NearbyCityApiService` also caught only `IOException` around a body it then
+parses, so a truncated response threw `JSONException` past its own "empty on
+failure" contract. The way-of-life watcher's catch-all meant that surfaced as a
+mystery log line and a retry 30 seconds later rather than a crash — the wrong
+behaviour, not a fatal one. It now catches `JSONException` and returns empty
+like every other failure.
+
+Tests: 4 new cases in `TourLogicTest` (338 total, 0 failures) for the ordinary
+cooldown, the doubling, the cap, and one that checks the backoff actually holds
+filler back through `shouldPlayWayOfLife`.
+
+**Noted for the next round — a systemic version of the same flaw.**
+`PlacesApiService`, `GeocodingApiService`, `RoutingApiService`,
+`GooglePlacesApiService`, `GoogleGeocodingApiService` and
+`GoogleRoutingApiService` all parse the response body inside a `try` that
+catches only `IOException`, so a malformed body throws `JSONException` at the
+caller in each of them. Not fixed here: each has a different caller with
+different error handling, so it wants one deliberate sweep rather than a
+drive-by.

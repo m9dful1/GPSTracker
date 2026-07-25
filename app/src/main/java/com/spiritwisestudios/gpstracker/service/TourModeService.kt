@@ -123,11 +123,14 @@ class TourModeService : Service() {
     private val session = TourSession()
 
     // Way-of-life filler state: when the guide last said anything, when the
-    // last filler played, and the watcher job itself
+    // last filler played, how many region lookups in a row found nothing (the
+    // watcher backs off rather than re-asking every 30 seconds), and the
+    // watcher job itself
     private var wayOfLifeJob: Job? = null
     @Volatile
     private var lastSpokenAt = 0L
     private var lastWayOfLifeAt: Long? = null
+    private var wayOfLifeEmptyLookups = 0
 
     companion object {
         // Search this far around the user (or route samples) for POIs
@@ -371,6 +374,7 @@ class TourModeService : Service() {
         wayOfLifeJob?.cancel()
         wayOfLifeJob = null
         lastWayOfLifeAt = null
+        wayOfLifeEmptyLookups = 0
         routeCorridorActive = false
         lastFetchCenter = null
         locationAwarenessService.stopProximityMonitoring()
@@ -894,7 +898,15 @@ class TourModeService : Service() {
             contentService.peekNextContent() != null
         val speed = locationAwarenessService.getCurrentSpeed() ?: 0f
         val now = System.currentTimeMillis()
-        if (!TourLogic.shouldPlayWayOfLife(now, lastSpokenAt, lastWayOfLifeAt, speed, narrationBusy)) {
+        if (!TourLogic.shouldPlayWayOfLife(
+                now,
+                lastSpokenAt,
+                lastWayOfLifeAt,
+                speed,
+                narrationBusy,
+                TourLogic.wayOfLifeCooldownMs(wayOfLifeEmptyLookups)
+            )
+        ) {
             return
         }
 
@@ -908,7 +920,23 @@ class TourModeService : Service() {
         val location = locationAwarenessService.getCurrentLocation() ?: return
         val region = nearbyCityApiService
             .nearbyCities(location, WAY_OF_LIFE_CITY_RADIUS_METERS)
-            .firstOrNull() ?: return
+            .firstOrNull()
+        if (region == null) {
+            // Nothing to talk about here — empty country, or a public API
+            // turning us away. Either way, stamp the cooldown and back off:
+            // without this, the emptiest roads (exactly what this feature is
+            // for) got an Overpass POST every 30 seconds for the whole drive.
+            wayOfLifeEmptyLookups++
+            lastWayOfLifeAt = now
+            Timber.d(
+                "No region to describe; backing off to " +
+                    "${TourLogic.wayOfLifeCooldownMs(wayOfLifeEmptyLookups) / 60_000}m"
+            )
+            return
+        }
+        // Found somewhere: the road isn't empty after all
+        wayOfLifeEmptyLookups = 0
+
         if (!session.markRegionNarrated(region.name)) {
             // Nearest region already covered this session; wait out a full
             // cooldown instead of re-running the lookup every pass

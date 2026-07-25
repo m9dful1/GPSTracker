@@ -232,6 +232,26 @@ object TourLogic {
     /** At most one way-of-life segment per this window — rest is also planned. */
     const val WAY_OF_LIFE_COOLDOWN_MS = 10L * 60L * 1000L
 
+    /** However often a region lookup comes back empty, wait no longer than this. */
+    const val WAY_OF_LIFE_MAX_COOLDOWN_MS = 60L * 60L * 1000L
+
+    /**
+     * How long to wait before looking for a region again, after
+     * [consecutiveEmptyLookups] lookups that found nothing to talk about.
+     *
+     * An empty answer means either genuinely empty country or a public API
+     * that is rate-limiting us — and both deserve the same response, which is
+     * to ask less often. Doubling from the ordinary cooldown turns a rural
+     * highway from two lookups a minute into a handful an hour.
+     */
+    fun wayOfLifeCooldownMs(consecutiveEmptyLookups: Int): Long {
+        if (consecutiveEmptyLookups <= 0) return WAY_OF_LIFE_COOLDOWN_MS
+
+        val doublings = (consecutiveEmptyLookups - 1).coerceIn(0, 8)
+        return (WAY_OF_LIFE_COOLDOWN_MS shl doublings)
+            .coerceAtMost(WAY_OF_LIFE_MAX_COOLDOWN_MS)
+    }
+
     /**
      * Way-of-life filler is a driving-tour device (long empty road); on
      * foot, quiet is just a walk in the park.
@@ -251,13 +271,14 @@ object TourLogic {
         lastSpokenAtMillis: Long,
         lastWayOfLifeAtMillis: Long?,
         speedMetersPerSecond: Float,
-        narrationBusy: Boolean
+        narrationBusy: Boolean,
+        cooldownMs: Long = WAY_OF_LIFE_COOLDOWN_MS
     ): Boolean {
         if (narrationBusy) return false
         if (speedMetersPerSecond < WAY_OF_LIFE_MIN_SPEED_MPS) return false
         if (nowMillis - lastSpokenAtMillis < QUIET_STRETCH_MS) return false
         if (lastWayOfLifeAtMillis != null &&
-            nowMillis - lastWayOfLifeAtMillis < WAY_OF_LIFE_COOLDOWN_MS
+            nowMillis - lastWayOfLifeAtMillis < cooldownMs
         ) {
             return false
         }

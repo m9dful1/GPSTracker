@@ -367,6 +367,56 @@ class TourLogicTest {
         assertEquals("While the road is quiet, a little about Reno.", intro)
     }
 
+    // --- wayOfLifeCooldownMs ---
+
+    @Test
+    fun `a fruitful lookup keeps the ordinary cooldown`() {
+        assertEquals(TourLogic.WAY_OF_LIFE_COOLDOWN_MS, TourLogic.wayOfLifeCooldownMs(0))
+    }
+
+    @Test
+    fun `each empty lookup doubles the wait`() {
+        // Empty country, or a public API turning us away: asking again in 30
+        // seconds — for the whole drive — is what this prevents.
+        assertEquals(TourLogic.WAY_OF_LIFE_COOLDOWN_MS, TourLogic.wayOfLifeCooldownMs(1))
+        assertEquals(TourLogic.WAY_OF_LIFE_COOLDOWN_MS * 2, TourLogic.wayOfLifeCooldownMs(2))
+        assertEquals(TourLogic.WAY_OF_LIFE_COOLDOWN_MS * 4, TourLogic.wayOfLifeCooldownMs(3))
+    }
+
+    @Test
+    fun `the backoff stops growing at the maximum`() {
+        assertEquals(TourLogic.WAY_OF_LIFE_MAX_COOLDOWN_MS, TourLogic.wayOfLifeCooldownMs(4))
+        assertEquals(TourLogic.WAY_OF_LIFE_MAX_COOLDOWN_MS, TourLogic.wayOfLifeCooldownMs(40))
+        assertEquals(TourLogic.WAY_OF_LIFE_MAX_COOLDOWN_MS, TourLogic.wayOfLifeCooldownMs(4_000))
+    }
+
+    @Test
+    fun `a longer backoff actually holds filler back`() {
+        val backedOff = TourLogic.wayOfLifeCooldownMs(3)
+
+        // Past the ordinary cooldown, but not past the backed-off one
+        assertFalse(
+            TourLogic.shouldPlayWayOfLife(
+                nowMillis = now,
+                lastSpokenAtMillis = quietLongEnough,
+                lastWayOfLifeAtMillis = now - TourLogic.WAY_OF_LIFE_COOLDOWN_MS,
+                speedMetersPerSecond = drivingSpeed,
+                narrationBusy = false,
+                cooldownMs = backedOff
+            )
+        )
+        assertTrue(
+            TourLogic.shouldPlayWayOfLife(
+                nowMillis = now,
+                lastSpokenAtMillis = quietLongEnough,
+                lastWayOfLifeAtMillis = now - backedOff,
+                speedMetersPerSecond = drivingSpeed,
+                narrationBusy = false,
+                cooldownMs = backedOff
+            )
+        )
+    }
+
     // --- detailLevelFor ---
 
     @Test
