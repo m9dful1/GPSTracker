@@ -49,6 +49,24 @@ class PlacesRepositoryImpl @Inject constructor(
                 }
             }
         }
+
+        /**
+         * The row to write when a place has just been narrated.
+         *
+         * The caller's copy comes from whatever discovered the place, which
+         * may predate anything the user has since added to it — so the stored
+         * row wins wherever there is one, and only the visit is asserted.
+         */
+        internal fun narrationStamp(
+            stored: PointOfInterest?,
+            narrated: PointOfInterest,
+            narratedAtMillis: Long
+        ): PointOfInterest {
+            return (stored ?: narrated).copy(
+                isVisited = true,
+                visitedDate = narratedAtMillis
+            )
+        }
     }
 
     /**
@@ -142,6 +160,26 @@ class PlacesRepositoryImpl @Inject constructor(
             Result.success(Unit)
         } catch (e: Exception) {
             Timber.e(e, "Error saving visited place")
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun markPlaceNarrated(
+        pointOfInterest: PointOfInterest,
+        narratedAtMillis: Long
+    ): Result<Unit> {
+        return try {
+            // Local read only: the point of narrating from a place already in
+            // hand is to avoid a lookup that could reach the network
+            val stored = pointOfInterestDao.getPointOfInterestById(pointOfInterest.id)
+                ?.toDomainModel()
+            val entity = PointOfInterestEntity.fromDomainModel(
+                narrationStamp(stored, pointOfInterest, narratedAtMillis)
+            )
+            pointOfInterestDao.insertPointOfInterest(entity)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Timber.e(e, "Error recording narrated place")
             Result.failure(e)
         }
     }

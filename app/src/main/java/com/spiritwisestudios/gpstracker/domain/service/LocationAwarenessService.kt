@@ -63,10 +63,23 @@ interface LocationAwarenessService {
     
     /**
      * Unregister all points of interest from proximity monitoring.
-     * 
+     *
      * @return True if unregistration was successful
      */
     suspend fun unregisterAllPointsOfInterest(): Boolean
+
+    /**
+     * A place already being monitored, by id.
+     *
+     * Registration keeps the whole object, so anything reacting to a
+     * transition for one of these places already has it: looking it up here
+     * saves a repository round trip that, for a place not yet in the
+     * database, means a network call — a billable one on the Google provider,
+     * and no narration at all when it fails.
+     *
+     * @return The registered place, or null if it isn't being monitored.
+     */
+    fun monitoredPointOfInterest(pointOfInterestId: String): PointOfInterest?
     
     /**
      * Get the current location of the device.

@@ -554,6 +554,21 @@ class TourModeService : Service() {
     }
 
     /**
+     * The place behind an id, without paying for it twice.
+     *
+     * Everything the tour narrates was registered for monitoring first, and
+     * registration keeps the whole object — so the id that arrives with a
+     * geofence transition or on a queued narration is nearly always one we
+     * already hold. The repository is the fallback for the rest, and it only
+     * reaches the network for a place that isn't in the database yet, which on
+     * the Google provider is a billable Places call per geofence crossing.
+     */
+    private suspend fun placeById(poiId: String): PointOfInterest? {
+        return locationAwarenessService.monitoredPointOfInterest(poiId)
+            ?: placesRepository.getPlaceDetails(poiId).getOrNull()
+    }
+
+    /**
      * Handle geofence transitions forwarded by the location awareness service.
      */
     private fun handleGeofenceEvent(action: String, geofenceIds: List<String>) {
@@ -561,22 +576,26 @@ class TourModeService : Service() {
             try {
                 when (action) {
                     "enter", "dwell" -> {
-                        // For each geofence ID (POI ID), fetch the POI and generate/play content
                         for (poiId in geofenceIds) {
-                            val result = placesRepository.getPlaceDetails(poiId)
-                            result.onSuccess { poi ->
-                                // If we're already describing this POI, don't interrupt
-                                if (currentPoi?.id == poi.id) {
-                                    return@onSuccess
-                                }
-
-                                // Generate and queue content for this POI
-                                val priority = if (action == "dwell") 1 else 0
-                                generateAndQueueContent(poi, priority)
-
-                                // Update notification
-                                updateNotification("Tour Mode Active", "Approaching ${poi.name}", NOTIFICATION_CHANNEL_SERVICE)
+                            // The place is already in hand: monitoring holds
+                            // the object that produced this transition
+                            val poi = placeById(poiId)
+                            if (poi == null) {
+                                Timber.w("Geofence $poiId crossed but the place is unknown")
+                                continue
                             }
+
+                            // If we're already describing this POI, don't interrupt
+                            if (currentPoi?.id == poi.id) {
+                                continue
+                            }
+
+                            // Generate and queue content for this POI
+                            val priority = if (action == "dwell") 1 else 0
+                            generateAndQueueContent(poi, priority)
+
+                            // Update notification
+                            updateNotification("Tour Mode Active", "Approaching ${poi.name}", NOTIFICATION_CHANNEL_SERVICE)
                         }
                     }
                     "exit" -> {
@@ -750,7 +769,7 @@ class TourModeService : Service() {
                     return
                 }
 
-                val poi = placesRepository.getPlaceDetails(content.poiId).getOrNull()
+                val poi = placeById(content.poiId)
 
                 // Queued narrations can be overtaken by the drive. A guide
                 // previews what's coming; a place that's already well behind
@@ -793,11 +812,11 @@ class TourModeService : Service() {
 
                                 // Remember this place was narrated, with a fresh
                                 // timestamp so the revisit cooldown restarts (a
-                                // re-narrated place shouldn't repeat every pass)
+                                // re-narrated place shouldn't repeat every pass).
+                                // Only the visit is written: this copy came from
+                                // discovery and may not carry the user's notes.
                                 poi?.let {
-                                    placesRepository.saveVisitedPlace(
-                                        it.copy(isVisited = true, visitedDate = System.currentTimeMillis())
-                                    )
+                                    placesRepository.markPlaceNarrated(it, System.currentTimeMillis())
                                     updateTripHighlight(it)
                                 }
                                 tripNarrationCount++

@@ -189,7 +189,7 @@ competing with the map's camera animation.
 **Fix:** precompute each instruction's route index once per route version and
 move the per-fix update off the main looper.
 
-### A12 · Every narration re-fetches a POI already in memory — `TODO`
+### A12 · Every narration re-fetches a POI already in memory — `DONE`
 
 `handleGeofenceEvent` and `deliverNextContent` both call
 `placesRepository.getPlaceDetails(id)` (`TourModeService.kt:495`, `:661`),
@@ -710,3 +710,32 @@ could be a windowed search around the last known progress index instead of a
 full scan. That is a real further win on long routes, but it needs care around
 loop routes that pass near themselves, and 2,000 float operations off the main
 thread every five seconds is no longer the bottleneck.
+
+### A12 — "Narrate the place we already have"
+
+`LocationAwarenessService` gained `monitoredPointOfInterest(id)`, and both
+lookups go through one `placeById` helper: memory first, repository second.
+Everything the guide narrates was registered for monitoring beforehand, and
+registration keeps the whole object, so the id arriving on a geofence
+transition or a queued narration is nearly always one already in hand. The
+repository stays as the fallback, which is the only path that can reach the
+network — a billable Places call per geofence crossing on the Google provider,
+and no narration at all when it fails.
+
+The geofence handler also got simpler: `getPlaceDetails(...).onSuccess { }`
+became a plain null check, so an unknown id now logs and moves on to the next
+geofence instead of silently skipping the rest of the callback body.
+
+**A data-loss trap this opened, and how it's closed.** The repository copy is
+the *stored* row; the monitored copy came from discovery. The delivery loop
+finished by writing `poi.copy(isVisited = true, ...)` through
+`saveVisitedPlace`, which is an insert-or-replace of the whole row — so
+narrating from the discovery copy would have written the user's own notes off
+the record. `PlacesRepository.markPlaceNarrated` now asserts only the visit:
+`narrationStamp` keeps the stored row wherever there is one and stamps the
+timestamp onto it, reading locally so the saving never reaches the network
+either. Registration already merges visited state (`mergeVisitedState` runs on
+every discovery), so the in-memory copy is otherwise as good as the stored one.
+
+Tests: 3 new cases in `PlacesRepositoryImplTest` (352 total, 0 failures) — the
+plain stamp, the notes surviving a re-narration, and the cooldown restarting.

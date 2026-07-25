@@ -398,6 +398,10 @@ class LocationAwarenessServiceImpl @Inject constructor(
     /**
      * Unregister all points of interest from proximity monitoring.
      */
+    override fun monitoredPointOfInterest(pointOfInterestId: String): PointOfInterest? {
+        return monitoredPointsOfInterest[pointOfInterestId]
+    }
+
     override suspend fun unregisterAllPointsOfInterest(): Boolean {
         monitoredPointsOfInterest.clear()
         customRadii.clear()

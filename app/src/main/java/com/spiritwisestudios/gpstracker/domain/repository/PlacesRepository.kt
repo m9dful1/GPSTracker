@@ -43,10 +43,28 @@ interface PlacesRepository {
      * @return Result indicating success or failure
      */
     suspend fun saveVisitedPlace(pointOfInterest: PointOfInterest): Result<Unit>
-    
+
+    /**
+     * Record that a place has just been narrated.
+     *
+     * Unlike [saveVisitedPlace], this only asserts the visit: anything
+     * already stored about the place — the user's own notes above all — is
+     * kept, because the caller may be holding a copy discovered before the
+     * user ever wrote them.
+     *
+     * @param pointOfInterest The place that was narrated
+     * @param narratedAtMillis When it was narrated, restarting the revisit
+     *   cooldown
+     * @return Result indicating success or failure
+     */
+    suspend fun markPlaceNarrated(
+        pointOfInterest: PointOfInterest,
+        narratedAtMillis: Long
+    ): Result<Unit>
+
     /**
      * Get all visited places from database
-     * 
+     *
      * @return Flow of points of interest that have been visited
      */
     fun getVisitedPlaces(): Flow<List<PointOfInterest>>

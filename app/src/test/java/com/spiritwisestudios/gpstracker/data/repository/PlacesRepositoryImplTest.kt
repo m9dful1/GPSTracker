@@ -20,6 +20,50 @@ class PlacesRepositoryImplTest {
         placeId = placeId
     )
 
+    // --- narrationStamp ---
+
+    @Test
+    fun `narrating a place records the visit`() {
+        val stamped = PlacesRepositoryImpl.narrationStamp(
+            stored = null,
+            narrated = poi("a"),
+            narratedAtMillis = 5_000L
+        )
+
+        assertTrue(stamped.isVisited)
+        assertEquals(5_000L, stamped.visitedDate)
+    }
+
+    @Test
+    fun `narrating a place keeps the notes the user wrote on it`() {
+        // The narrating copy comes from discovery and predates the notes; a
+        // plain save would have written them away.
+        val stored = poi("a").copy(userNotes = "Ask about the mill wheel")
+
+        val stamped = PlacesRepositoryImpl.narrationStamp(
+            stored = stored,
+            narrated = poi("a"),
+            narratedAtMillis = 9_000L
+        )
+
+        assertEquals("Ask about the mill wheel", stamped.userNotes)
+        assertTrue(stamped.isVisited)
+        assertEquals(9_000L, stamped.visitedDate)
+    }
+
+    @Test
+    fun `re-narrating restarts the revisit cooldown`() {
+        val stored = poi("a").copy(isVisited = true, visitedDate = 1_000L)
+
+        val stamped = PlacesRepositoryImpl.narrationStamp(
+            stored = stored,
+            narrated = poi("a"),
+            narratedAtMillis = 60_000L
+        )
+
+        assertEquals(60_000L, stamped.visitedDate)
+    }
+
     @Test
     fun `visited state is overlaid onto fresh results`() {
         val merged = PlacesRepositoryImpl.mergeVisitedState(
