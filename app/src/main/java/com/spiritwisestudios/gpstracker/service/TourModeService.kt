@@ -43,6 +43,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
 
 /**
@@ -132,7 +133,13 @@ class TourModeService : Service() {
 
     // When each automatic narration was queued, for the per-hour cap.
     // Entries older than the window are pruned as new ones arrive.
-    private val narrationTimes = mutableListOf<Long>()
+    //
+    // Copy-on-write because two places in range on one fix now alert
+    // separately, so the cap is read and written from concurrent coroutines
+    // and a plain list would throw ConcurrentModificationException mid-count.
+    // The list is at most a few dozen entries. Ownership and atomicity are
+    // still A7's to fix; this only closes the crash.
+    private val narrationTimes = CopyOnWriteArrayList<Long>()
 
     companion object {
         // Search this far around the user (or route samples) for POIs

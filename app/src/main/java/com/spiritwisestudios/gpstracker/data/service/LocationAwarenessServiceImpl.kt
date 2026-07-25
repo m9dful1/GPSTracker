@@ -14,9 +14,9 @@ import com.spiritwisestudios.gpstracker.domain.service.LocationAwarenessService
 import com.spiritwisestudios.gpstracker.service.TourModeService
 import com.spiritwisestudios.gpstracker.util.AppConstants
 import com.spiritwisestudios.gpstracker.util.LocationCadence
+import com.spiritwisestudios.gpstracker.util.ProximityAlertGate
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import timber.log.Timber
 import java.util.concurrent.ConcurrentHashMap
@@ -50,7 +50,9 @@ class LocationAwarenessServiceImpl @Inject constructor(
     private var locationListener: LocationListenerCompat? = null
     private var isMonitoring = false
 
-    private val proximityAlerts = MutableStateFlow<LocationAwarenessService.ProximityAlert?>(null)
+    // One alert per place per change: every fix re-measures every place, and
+    // an alert costs the tour service a content lookup
+    private val alertGate = ProximityAlertGate()
 
     // Store previous location to calculate direction and speed
     private var previousLocation: Location? = null
@@ -109,16 +111,16 @@ class LocationAwarenessServiceImpl @Inject constructor(
             // Speed and direction of travel, computed once per fix
             updateMotion(location)
 
-            // Process the new location (alerts + geofence transitions)
-            processNewLocation(location, detectionRadius)
+            // Process the new location (alerts + geofence transitions). Each
+            // alert is sent as it is produced: collecting them in one shared
+            // field meant two places in range left only the last one, and a
+            // fix that produced nothing re-sent whatever was there before.
+            processNewLocation(location, detectionRadius) { alert ->
+                trySend(alert)
+            }
 
             // Speed may have moved the desired cadence to another band
             applyDesiredInterval()
-
-            // Check if new alert is available
-            proximityAlerts.value?.let { alert ->
-                trySend(alert)
-            }
         }
 
         try {
@@ -196,8 +198,15 @@ class LocationAwarenessServiceImpl @Inject constructor(
     /**
      * Process a new location update: generate proximity alerts and derive
      * geofence enter/dwell/exit transitions for the monitored POIs.
+     *
+     * [onAlert] receives every alert this fix produced, in the order they
+     * were found — one place in range must not hide another.
      */
-    private fun processNewLocation(location: Location, defaultRadius: Int) {
+    private fun processNewLocation(
+        location: Location,
+        defaultRadius: Int,
+        onAlert: (LocationAwarenessService.ProximityAlert) -> Unit
+    ) {
         val currentTime = System.currentTimeMillis()
 
         // Motion computed once per fix by updateMotion()
@@ -235,24 +244,31 @@ class LocationAwarenessServiceImpl @Inject constructor(
                 else -> null // No alert needed
             }
 
-            // If an alert is needed, create and emit it
-            alertType?.let {
-                // Calculate estimated time to reach if approaching
-                val estimatedTimeToReach = if (it == LocationAwarenessService.AlertType.APPROACHING && speed > 0) {
+            // Alert only on something new for this place — a changed state,
+            // or the same one held long enough to bear repeating. The gate is
+            // consulted even with no alert, so leaving the radius clears the
+            // place and a return alerts straight away.
+            val worthAlerting = alertGate.shouldAlert(poiId, alertType, currentTime)
+            if (alertType == null || !worthAlerting) {
+                continue
+            }
+
+            // Calculate estimated time to reach if approaching
+            val estimatedTimeToReach =
+                if (alertType == LocationAwarenessService.AlertType.APPROACHING && speed > 0) {
                     (distance / speed * 1000).toLong() // milliseconds
                 } else {
                     null
                 }
 
-                val alert = LocationAwarenessService.ProximityAlert(
+            onAlert(
+                LocationAwarenessService.ProximityAlert(
                     pointOfInterest = poi,
                     distance = distance,
                     estimatedTimeToReach = estimatedTimeToReach,
-                    alertType = it
+                    alertType = alertType
                 )
-
-                proximityAlerts.value = alert
-            }
+            )
         }
     }
 
@@ -322,6 +338,7 @@ class LocationAwarenessServiceImpl @Inject constructor(
         requestedIntervalMs = 0L
         geofenceEntryTimes.clear()
         dwellNotified.clear()
+        alertGate.reset()
     }
 
     /**
@@ -374,6 +391,7 @@ class LocationAwarenessServiceImpl @Inject constructor(
         customRadii.remove(pointOfInterestId)
         geofenceEntryTimes.remove(pointOfInterestId)
         dwellNotified.remove(pointOfInterestId)
+        alertGate.forget(pointOfInterestId)
         return true
     }
 
@@ -385,6 +403,7 @@ class LocationAwarenessServiceImpl @Inject constructor(
         customRadii.clear()
         geofenceEntryTimes.clear()
         dwellNotified.clear()
+        alertGate.reset()
         return true
     }
 

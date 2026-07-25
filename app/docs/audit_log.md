@@ -101,7 +101,7 @@ recorded in `tour_guide_research.md:37`.
 **Fix:** dedup by `poiId` inside the queue, plus a spoken-this-session set so
 a place can't be re-queued after it has been told.
 
-### A6 · Proximity alerts lose all but one POI per fix — `TODO`
+### A6 · Proximity alerts lose all but one POI per fix — `DONE`
 
 `processNewLocation` writes `proximityAlerts.value = alert` inside the
 per-POI loop (`LocationAwarenessServiceImpl.kt:254`) and the listener sends
@@ -497,3 +497,38 @@ Tests: 7 new cases in `ContentDeliveryQueueTest` (304 total, 0 failures)
 covering enter+dwell, arrival replacing approach, the weaker claim, the
 re-alert after telling, the stale-drop re-queue, other places being
 unaffected, and a fresh tour after `clear()`.
+
+### A6 — "Alert about every place in range, once each"
+
+The `MutableStateFlow` that alerts were written into is gone.
+`processNewLocation` now takes an `onAlert` callback and sends each alert as it
+is found, so two places in range produce two alerts instead of whichever won
+the `ConcurrentHashMap` iteration order — and a fix that finds nothing sends
+nothing, where before the listener re-read the retained value and re-sent the
+last alert forever.
+
+Per-POI rate limiting landed in the same change, as the task required: the
+conflation was the only thing holding back an alert per place per fix. The
+rule lives in `util/ProximityAlertGate` — alert when the place's state moves
+on (nearby → approaching → arrived), or when the same state has held for
+`DEFAULT_REPEAT_AFTER_MS` (10 minutes), because a repeat says nothing new. The
+gate is consulted even when a place produces no alert, which is how leaving
+the radius forgets it: coming back is news again rather than waiting out a
+cooldown. It is cleared on unregister and on stop.
+
+This is the first change to make the subsystem actually pull its weight —
+narration previously survived only because the geofence path fires per POI,
+which made these alerts dead weight.
+
+**One thing this change forced.** Two places alerting on one fix means two
+concurrent `generateAndQueueContent` coroutines, and `narrationTimes` was a
+plain `mutableListOf` read with `count {}` while another coroutine appended —
+a `ConcurrentModificationException` that, on the proximity path, has no
+surrounding catch and so would crash rather than drop a narration. It is now a
+`CopyOnWriteArrayList`, which closes the crash. **A7 still owns the real fix**:
+one owner for the per-tour state, so the cap is read and written atomically
+rather than merely without crashing.
+
+Tests: 9 cases in `ProximityAlertGateTest` (313 total, 0 failures) covering the
+per-fix repeat, state progression, three places not hiding each other, the
+repeat window, leaving and re-entering the radius, unregister, and reset.
