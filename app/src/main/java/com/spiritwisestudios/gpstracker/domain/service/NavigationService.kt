@@ -77,14 +77,6 @@ interface NavigationService {
     fun isNavigating(): Boolean
     
     /**
-     * Geocode an address to coordinates.
-     *
-     * @param address The address string to geocode
-     * @return The coordinates or null if geocoding failed
-     */
-    suspend fun geocodeAddress(address: String): LatLng?
-    
-    /**
      * Navigation status data class.
      */
     data class NavigationStatus(

@@ -2,7 +2,6 @@ package com.spiritwisestudios.gpstracker.data.service
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.location.Geocoder
 import android.location.Location
 import android.os.Build
 import androidx.core.location.LocationListenerCompat
@@ -18,7 +17,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import timber.log.Timber
-import java.util.Locale
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import android.net.ConnectivityManager
@@ -29,7 +27,6 @@ import com.spiritwisestudios.gpstracker.util.RouteProgress
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.IOException
 import android.graphics.Color
 
 class NavigationServiceImpl @Inject constructor(
@@ -38,7 +35,6 @@ class NavigationServiceImpl @Inject constructor(
 ) : NavigationService {
 
     private val locationClient = FrameworkLocationClient(context)
-    private val geocoder: Geocoder = Geocoder(context, Locale.getDefault())
     private val navigationState = MutableStateFlow<NavigationState>(NavigationState.Inactive)
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -524,44 +520,6 @@ class NavigationServiceImpl @Inject constructor(
         }
     }
 
-    /**
-     * Geocode an address to coordinates
-     */
-    override suspend fun geocodeAddress(address: String): LatLng? {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                var result: LatLng? = null
-                geocoder.getFromLocationName(address, 1) { addresses ->
-                    if (addresses.isNotEmpty()) {
-                        val latitude = addresses[0].latitude
-                        val longitude = addresses[0].longitude
-                        result = LatLng(latitude, longitude)
-                    }
-                }
-                result
-            } else {
-                @Suppress("DEPRECATION")
-                val addresses = geocoder.getFromLocationName(address, 1)
-                if (addresses != null && addresses.isNotEmpty()) {
-                    val latitude = addresses[0].latitude
-                    val longitude = addresses[0].longitude
-                    LatLng(latitude, longitude)
-                } else {
-                    null
-                }
-            }
-        } catch (e: IOException) {
-            Timber.e(e, "Network error geocoding address: $address")
-            null
-        } catch (e: IllegalArgumentException) {
-            Timber.e(e, "Invalid address format: $address")
-            null
-        } catch (e: Exception) {
-            Timber.e(e, "Error geocoding address: $address - ${e.message}")
-            null
-        }
-    }
-    
     private fun calculateDistance(start: LatLng, end: LatLng): Float {
         val results = FloatArray(1)
         Location.distanceBetween(

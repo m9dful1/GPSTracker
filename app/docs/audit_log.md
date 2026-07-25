@@ -245,7 +245,7 @@ persisted and read but never applied and has no UI.
 **Fix:** delete the dead source and dependencies; either wire up
 `darkModeEnabled` or drop it.
 
-### A17 · `geocodeAddress` is broken on Android 13+ and unused — `TODO`
+### A17 · `geocodeAddress` is broken on Android 13+ and unused — `DONE`
 
 The API 33 branch passes a callback and returns `result` synchronously, so it
 is always null (`NavigationServiceImpl.kt:538`). Nothing calls it.
@@ -875,3 +875,25 @@ wants three states, and this field wouldn't have been reusable for that anyway.
 No new tests: this is removal, and the tally drops by one (366) because
 `ExampleUnitTest` was one of the deletions. Debug and release both compile,
 and nothing named retrofit or navigation remains on the runtime classpath.
+
+### A17 — "Delete the geocoder that never worked"
+
+Deleted rather than fixed, from both `NavigationServiceImpl` and the
+`NavigationService` interface, along with the `Geocoder` field and the three
+imports that went with it.
+
+Fixing it would have meant building a `suspendCancellableCoroutine` wrapper
+around the platform geocoder to compete with something the app already has and
+already uses: address lookup goes through `GeocodingApiService` (Photon) or
+`GoogleGeocodingApiService`, chosen by the map-provider setting, and that is
+what the destination search runs on. A second implementation on a different
+backend, with different failure modes and no callers, is not an asset — and this
+one returned null on every Android 13+ device because it read `result` before
+the callback it passes had any chance to set it.
+
+If platform geocoding is ever genuinely wanted, `suspendCancellableCoroutine`
+is the shape it needs, and the API services are the precedent for where it
+belongs.
+
+No new tests: removal, and the tally holds at 366 with debug and release both
+compiling.
