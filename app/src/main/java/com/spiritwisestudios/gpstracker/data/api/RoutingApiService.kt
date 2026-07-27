@@ -11,6 +11,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.IOException
@@ -119,6 +120,23 @@ class RoutingApiService(
         }
 
         /**
+         * [parseRouteResponse], with a body we can't read treated as no
+         * route.
+         *
+         * [getRoute]'s last-resort catch already turned this into null, but it
+         * logged it as "unexpected error", which is the wrong word for the
+         * ordinary behaviour of a free public server under load — and the log
+         * is all anyone has when a route silently doesn't appear.
+         */
+        internal fun parseRouteResponseOrNull(json: String): Route? =
+            try {
+                parseRouteResponse(json)
+            } catch (e: JSONException) {
+                Timber.e(e, "Valhalla route response could not be parsed")
+                null
+            }
+
+        /**
          * Map Valhalla maneuver type codes onto the domain instruction types,
          * mirroring how the Google maneuver strings used to be bucketed.
          */
@@ -167,7 +185,7 @@ class RoutingApiService(
                     val errorMessage = responseData?.let {
                         try {
                             JSONObject(it).optString("error")
-                        } catch (e: Exception) {
+                        } catch (e: JSONException) {
                             null
                         }
                     }
@@ -180,12 +198,14 @@ class RoutingApiService(
                     return@withContext null
                 }
 
-                parseRouteResponse(responseData)
+                parseRouteResponseOrNull(responseData)
             }
         } catch (e: IOException) {
             Timber.e(e, "Network error when fetching route")
             null
         } catch (e: Exception) {
+            // Still a net: the parse can also trip over a numeric field that
+            // isn't a number, which is not a JSONException
             Timber.e(e, "Unexpected error getting route")
             null
         }

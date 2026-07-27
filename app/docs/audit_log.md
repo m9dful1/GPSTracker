@@ -1125,7 +1125,7 @@ destination pin still on it.
 
 ## Tier 2 — silent failure
 
-### B4 · The `JSONException` sweep round 1 deferred — `TODO`
+### B4 · The `JSONException` sweep round 1 deferred — `DONE`
 
 Banked from A10. `PlacesApiService:232`, `GeocodingApiService:163`,
 `GooglePlacesApiService:214` and `GoogleGeocodingApiService:116` parse the
@@ -1279,3 +1279,75 @@ No new tests: this is call ordering between an activity and two map SDKs, with
 no pure decision to pin down. `lintDebug` and both variants still build, and the
 change is small enough to read in full — but it *is* the kind of fix that only a
 device confirms, and I haven't run one.
+
+### B4 — "Let every API service fail the way its callers expect"
+
+Six services, three contracts, one shape: each parser gained a sibling that
+catches `JSONException` and answers in the caller's own currency.
+
+| Service | Contract | Guarded door |
+| --- | --- | --- |
+| `PlacesApiService` | throws `IOException` | `parseElementsResponseOrThrow` |
+| `GooglePlacesApiService` | throws `IOException` | `parseNearbyResponseOrThrow`, `parsePlaceDetailsOrThrow` |
+| `GeocodingApiService` | empty on failure | `parseSearchResponseOrEmpty` |
+| `GoogleGeocodingApiService` | empty on failure | `parseSearchResponseOrEmpty` |
+| `RoutingApiService` | null on failure | `parseRouteResponseOrNull` |
+| `GoogleRoutingApiService` | null on failure | `parseRouteResponseOrNull` |
+
+The raw parsers still throw, which is right — they're the strict readers, and
+the tests that assert what a well-formed body means still call them directly.
+What changed is that no service hands a `JSONException` to a caller that never
+named one.
+
+**The severity is not evenly spread, and the two geocoders are the real bug.**
+`search` promises "empty on failure", and both search sheets take it at its
+word: `DestinationSearchBottomSheet` and `TakeATourBottomSheet` launch it into
+a `lifecycleScope` with no `try` anywhere above it. A `JSONException` there was
+not a failed search, it was the app closing while the user typed. Everything
+else in the sweep was a *misreported* failure rather than a crash: the two
+Places services' callers all catch `Exception` broadly, so a malformed body
+already degraded to `Result.failure` or an empty flow — but it reached
+`ErrorMessages.friendlyMessage` as an unrecognized throwable and came out
+"Please try again", where an `IOException` says "no connection, check your
+internet". That mapping is the reason the wrapper throws `IOException` rather
+than something new.
+
+**The audit was wrong about the two routing services and I'm correcting the
+record.** B4 says their broad catch sits "only around an inner error-message
+parse — the route parse itself is outside it". It isn't: `parseRouteResponse`
+is called inside the same `try` as the request, and `catch (e: Exception)`
+below it has been catching it all along. So there was no bug here, only a bad
+log line — a malformed route body was already null, just logged as "Unexpected
+error getting route", which is the wrong word for the ordinary behaviour of a
+free public server under load and the only thing anyone has to go on when a
+route silently doesn't appear. Both now name it. The broad catch stays in both,
+with a comment saying what it's still for: `parseRouteResponse` can also trip
+over a numeric field that isn't numeric (`"duration": "1234s"` goes through
+`toDouble`) and on `coerceIn(0, shape.size - 1)` when a leg's shape decodes to
+nothing — neither is a `JSONException`.
+
+**Why `JSONException` and not `Exception`:** a blanket catch in the guarded
+door would swallow programming errors in the parsers themselves, which are
+where the domain mapping lives. I checked each parser for non-JSON failure
+modes reachable from a bad body, and the two geocoders — the two with no net
+above them — have none: every field they read goes through `optString` or
+`getDouble`, and `getDouble` throws `JSONException`.
+
+The `catch (e: Exception)` around each routing service's *error-message* parse
+narrowed to `JSONException` too. No behaviour change (anything else still lands
+in the outer catch), but it now says what can actually go wrong on that line.
+
+Tests: 12 new cases across the six test files (398 total, 0 failures). Two per
+service, and the second one is the one that matters — a guard that answers
+"empty"/"null"/"throw" for *everything* would pass the first test and fail the
+second, so each pair pins down both that a body we can't read fails per
+contract and that a body we can still parses through the same door. The
+malformed inputs are the two real ones: an HTML error page returned with HTTP
+200 (Overpass does this when overloaded) and a single field missing from an
+otherwise valid body.
+
+**Not covered:** the catch blocks themselves — the `try` in `search`,
+`runQuery`, `execute` and `getRoute` — still need an HTTP client to exercise,
+and there's no MockWebServer in the test setup. The guarded parse *is* the
+decision, and it's pure; what remains untested is the one-line call site that
+uses it.

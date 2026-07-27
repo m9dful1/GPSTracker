@@ -62,4 +62,31 @@ class GoogleGeocodingApiServiceTest {
         assertTrue(GoogleGeocodingApiService.parseSearchResponse(json).isEmpty())
         assertTrue(GoogleGeocodingApiService.parseSearchResponse("""{}""").isEmpty())
     }
+
+    // --- parseSearchResponseOrEmpty ---
+
+    @Test
+    fun `a body we cannot read is no results rather than a crash`() {
+        assertTrue(
+            GoogleGeocodingApiService.parseSearchResponseOrEmpty("<html>502 Bad Gateway</html>").isEmpty()
+        )
+        // A location object missing its latitude is not the same as no
+        // location object: the test above drops it, getDouble throws on it
+        assertTrue(
+            GoogleGeocodingApiService.parseSearchResponseOrEmpty(
+                """{"places":[{"id":"a","displayName":{"text":"Half a Place"},
+                   "location":{"longitude":-122.4783}}]}"""
+            ).isEmpty()
+        )
+    }
+
+    @Test
+    fun `the guarded parse still reads a body we can`() {
+        val results = GoogleGeocodingApiService.parseSearchResponseOrEmpty(
+            """{"places":[{"id":"a","displayName":{"text":"Golden Gate Bridge"},
+               "location":{"latitude":37.8199,"longitude":-122.4783}}]}"""
+        )
+
+        assertEquals("Golden Gate Bridge", results.single().name)
+    }
 }

@@ -4,8 +4,10 @@ import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 
 class PlacesApiServiceTest {
 
@@ -179,5 +181,35 @@ class PlacesApiServiceTest {
     @Test
     fun `description is empty when nothing is tagged`() {
         assertEquals("", PlacesApiService.buildDescription(tags("name" to "X")))
+    }
+
+    // --- parseElementsResponseOrThrow ---
+
+    @Test
+    fun `a body we cannot read fails as an IO error, not a JSON error`() {
+        // What an overloaded Overpass instance answers with, at HTTP 200
+        assertThrows(IOException::class.java) {
+            PlacesApiService.parseElementsResponseOrThrow(
+                "<html><body><p>runtime error: Query timed out</p></body></html>"
+            )
+        }
+        // And one bad element sinks the query the same way, because a POI
+        // without coordinates is not a POI we can drive anyone to
+        assertThrows(IOException::class.java) {
+            PlacesApiService.parseElementsResponseOrThrow(
+                """{"elements":[{"type":"node","id":1,"lat":"north","lon":-115.14,
+                   "tags":{"tourism":"museum","name":"The Neon Museum"}}]}"""
+            )
+        }
+    }
+
+    @Test
+    fun `the guarded parse still reads a body we can`() {
+        val pois = PlacesApiService.parseElementsResponseOrThrow(
+            """{"elements":[{"type":"node","id":1,"lat":36.17,"lon":-115.14,
+               "tags":{"tourism":"museum","name":"The Neon Museum"}}]}"""
+        )
+
+        assertEquals("The Neon Museum", pois.single().name)
     }
 }

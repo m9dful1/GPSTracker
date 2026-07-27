@@ -11,6 +11,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.IOException
@@ -135,6 +136,20 @@ class GoogleRoutingApiService(
         }
 
         /**
+         * [parseRouteResponse], with a body we can't read treated as no route
+         * — the same guard [RoutingApiService] carries, for the same reason:
+         * the last-resort catch logged it as "unexpected error", and the log
+         * is all anyone has when a route silently doesn't appear.
+         */
+        internal fun parseRouteResponseOrNull(json: String): Route? =
+            try {
+                parseRouteResponse(json)
+            } catch (e: JSONException) {
+                Timber.e(e, "Routes API route response could not be parsed")
+                null
+            }
+
+        /**
          * Map Routes API maneuver strings onto the domain instruction types,
          * mirroring how the Valhalla type codes are bucketed.
          */
@@ -180,7 +195,7 @@ class GoogleRoutingApiService(
                     val errorMessage = responseData?.let {
                         try {
                             JSONObject(it).optJSONObject("error")?.optString("message")
-                        } catch (e: Exception) {
+                        } catch (e: JSONException) {
                             null
                         }
                     }
@@ -193,12 +208,14 @@ class GoogleRoutingApiService(
                     return@withContext null
                 }
 
-                parseRouteResponse(responseData)
+                parseRouteResponseOrNull(responseData)
             }
         } catch (e: IOException) {
             Timber.e(e, "Network error when fetching route")
             null
         } catch (e: Exception) {
+            // Still a net: the duration field is parsed with toDouble, which
+            // throws NumberFormatException rather than JSONException
             Timber.e(e, "Unexpected error getting route")
             null
         }

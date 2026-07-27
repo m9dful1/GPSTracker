@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONException
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.IOException
@@ -96,6 +97,23 @@ class GeocodingApiService(
         }
 
         /**
+         * [parseSearchResponse], with a body we can't read treated as no
+         * results.
+         *
+         * [search] promises "empty on failure" and its callers hold it to
+         * that: both search sheets launch it into a `lifecycleScope` with no
+         * catch of their own, so a `JSONException` from a truncated body or an
+         * HTML error page didn't fail the search — it took the app down.
+         */
+        internal fun parseSearchResponseOrEmpty(json: String): List<SearchResult> =
+            try {
+                parseSearchResponse(json)
+            } catch (e: JSONException) {
+                Timber.e(e, "Photon response could not be parsed")
+                emptyList()
+            }
+
+        /**
          * Collapse same-named results within [DEDUPE_DISTANCE_METERS] of each
          * other, keeping the highest-ranked one. Same-named places far apart
          * (the many Eiffel Towers) are distinct results and all kept.
@@ -158,7 +176,7 @@ class GeocodingApiService(
                     return@withContext emptyList()
                 }
                 val body = response.body?.string() ?: return@withContext emptyList()
-                dedupe(parseSearchResponse(body)).take(limit)
+                dedupe(parseSearchResponseOrEmpty(body)).take(limit)
             }
         } catch (e: IOException) {
             Timber.e(e, "Photon search failed for \"$query\"")

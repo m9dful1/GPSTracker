@@ -9,6 +9,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.IOException
@@ -95,6 +96,25 @@ class GooglePlacesApiService(
             placeToPoi(JSONObject(json), requireCategory = false)
 
         /**
+         * The two parsers above, with a body we can't read reported as the
+         * `IOException` every [PlacesApi] caller already handles rather than
+         * a `JSONException` none of them names.
+         */
+        internal fun parseNearbyResponseOrThrow(json: String): List<PointOfInterest> =
+            orThrow("Nearby Search") { parseNearbyResponse(json) }
+
+        internal fun parsePlaceDetailsOrThrow(json: String): PointOfInterest? =
+            orThrow("Place Details") { parsePlaceDetails(json) }
+
+        private fun <T> orThrow(context: String, parse: () -> T): T =
+            try {
+                parse()
+            } catch (e: JSONException) {
+                Timber.e(e, "$context response could not be parsed")
+                throw IOException("Malformed $context response", e)
+            }
+
+        /**
          * Convert one REST place object into a domain POI, or null when it
          * has no id or location (or, when required, no touring category).
          */
@@ -176,7 +196,7 @@ class GooglePlacesApiService(
             )
             .build()
 
-        return parseNearbyResponse(execute(request, "Nearby Search"))
+        return parseNearbyResponseOrThrow(execute(request, "Nearby Search"))
     }
 
     override suspend fun getPlaceDetails(placeId: String): PointOfInterest {
@@ -186,7 +206,7 @@ class GooglePlacesApiService(
             .header("X-Goog-FieldMask", DETAILS_FIELD_MASK)
             .build()
 
-        return parsePlaceDetails(execute(request, "Place Details"))
+        return parsePlaceDetailsOrThrow(execute(request, "Place Details"))
             ?: throw IOException("Place not found: $placeId")
     }
 

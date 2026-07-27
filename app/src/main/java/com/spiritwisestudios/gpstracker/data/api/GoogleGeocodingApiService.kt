@@ -8,6 +8,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONException
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.IOException
@@ -85,6 +86,20 @@ class GoogleGeocodingApiService(
                 )
             }
         }
+
+        /**
+         * [parseSearchResponse], with a body we can't read treated as no
+         * results — the same guard [GeocodingApiService] carries, for the
+         * same reason: [search] promises "empty on failure" and the search
+         * sheets that call it have no catch of their own.
+         */
+        internal fun parseSearchResponseOrEmpty(json: String): List<SearchResult> =
+            try {
+                parseSearchResponse(json)
+            } catch (e: JSONException) {
+                Timber.e(e, "Text Search response could not be parsed")
+                emptyList()
+            }
     }
 
     override suspend fun search(
@@ -111,7 +126,7 @@ class GoogleGeocodingApiService(
                     return@withContext emptyList()
                 }
                 val body = response.body?.string() ?: return@withContext emptyList()
-                parseSearchResponse(body).take(limit)
+                parseSearchResponseOrEmpty(body).take(limit)
             }
         } catch (e: IOException) {
             Timber.e(e, "Text Search failed for \"$query\"")

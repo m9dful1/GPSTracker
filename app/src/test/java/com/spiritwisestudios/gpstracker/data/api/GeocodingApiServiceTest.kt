@@ -153,6 +153,35 @@ class GeocodingApiServiceTest {
         assertFalse(unbiased.contains("&zoom="))
     }
 
+    // --- parseSearchResponseOrEmpty ---
+
+    @Test
+    fun `a body we cannot read is no results rather than a crash`() {
+        // Both search sheets launch search() into a lifecycleScope with no
+        // catch of their own, so this is the difference between "no results
+        // for that" and the app going away
+        assertTrue(
+            GeocodingApiService.parseSearchResponseOrEmpty("<html>502 Bad Gateway</html>").isEmpty()
+        )
+        // Half a coordinate pair is half a place: getDouble(1) has nothing
+        assertTrue(
+            GeocodingApiService.parseSearchResponseOrEmpty(
+                """{"features":[{"geometry":{"coordinates":[-122.4783]},
+                   "properties":{"name":"Half a Point"}}]}"""
+            ).isEmpty()
+        )
+    }
+
+    @Test
+    fun `the guarded parse still reads a body we can`() {
+        val results = GeocodingApiService.parseSearchResponseOrEmpty(
+            """{"features":[{"geometry":{"coordinates":[-122.4783,37.8199]},
+               "properties":{"name":"Golden Gate Bridge"}}]}"""
+        )
+
+        assertEquals("Golden Gate Bridge", results.single().name)
+    }
+
     private fun result(name: String, lat: Double, lon: Double) =
         GeocodingApi.SearchResult(name, "", LatLng(lat, lon))
 }

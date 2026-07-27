@@ -96,6 +96,20 @@ class RoutingApiServiceTest {
         assertNull(RoutingApiService.parseRouteResponse("""{"error":"No path could be found"}"""))
     }
 
+    // --- parseRouteResponseOrNull ---
+
+    @Test
+    fun `a body we cannot read is no route, and says so by name`() {
+        assertNull(RoutingApiService.parseRouteResponseOrNull("<html>502 Bad Gateway</html>"))
+        // A trip without a summary: the distance and time are required
+        assertNull(RoutingApiService.parseRouteResponseOrNull("""{"trip":{"legs":[]}}"""))
+    }
+
+    @Test
+    fun `the guarded parse still reads a body we can`() {
+        assertNotNull(RoutingApiService.parseRouteResponseOrNull(validResponse))
+    }
+
     // --- mapManeuverType ---
 
     @Test

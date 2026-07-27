@@ -3,6 +3,7 @@ package com.spiritwisestudios.gpstracker.data.api
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -91,6 +92,32 @@ class GoogleRoutingApiServiceTest {
         assertNull(
             GoogleRoutingApiService.parseRouteResponse(
                 """{"routes":[{"distanceMeters":1,"duration":"1s","legs":[]}]}"""
+            )
+        )
+    }
+
+    // --- parseRouteResponseOrNull ---
+
+    @Test
+    fun `a body we cannot read is no route, and says so by name`() {
+        assertNull(GoogleRoutingApiService.parseRouteResponseOrNull("<html>502 Bad Gateway</html>"))
+        // A step whose startLocation carries no latLng: getJSONObject throws
+        assertNull(
+            GoogleRoutingApiService.parseRouteResponseOrNull(
+                """{"routes":[{"distanceMeters":1,"duration":"1s",
+                   "polyline":{"encodedPolyline":"$encodedPolyline"},
+                   "legs":[{"steps":[{"startLocation":{},
+                     "navigationInstruction":{"maneuver":"TURN_LEFT","instructions":"Turn left"}}]}]}]}"""
+            )
+        )
+    }
+
+    @Test
+    fun `the guarded parse still reads a body we can`() {
+        assertNotNull(
+            GoogleRoutingApiService.parseRouteResponseOrNull(
+                """{"routes":[{"distanceMeters":12000,"duration":"1234s",
+                   "polyline":{"encodedPolyline":"$encodedPolyline"},"legs":[]}]}"""
             )
         )
     }

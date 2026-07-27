@@ -4,8 +4,10 @@ import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 
 class GooglePlacesApiServiceTest {
 
@@ -96,5 +98,42 @@ class GooglePlacesApiServiceTest {
     fun `empty responses parse to no results`() {
         assertTrue(GooglePlacesApiService.parseNearbyResponse("""{"places":[]}""").isEmpty())
         assertTrue(GooglePlacesApiService.parseNearbyResponse("""{}""").isEmpty())
+    }
+
+    // --- the guarded parsers ---
+
+    @Test
+    fun `a body we cannot read fails as an IO error from either parser`() {
+        val truncated = """{"places":[{"id":"a","location":{"latitude":36.1"""
+
+        assertThrows(IOException::class.java) {
+            GooglePlacesApiService.parseNearbyResponseOrThrow(truncated)
+        }
+        assertThrows(IOException::class.java) {
+            GooglePlacesApiService.parsePlaceDetailsOrThrow(truncated)
+        }
+        // A location that isn't one fails too: getDouble has nothing to read
+        assertThrows(IOException::class.java) {
+            GooglePlacesApiService.parsePlaceDetailsOrThrow(
+                """{"id":"a","displayName":{"text":"Half a Place"},"location":{"longitude":-115.14}}"""
+            )
+        }
+    }
+
+    @Test
+    fun `the guarded parsers still read a body we can`() {
+        assertEquals(
+            "The Neon Museum",
+            GooglePlacesApiService.parseNearbyResponseOrThrow(
+                """{"places":[{"id":"a","displayName":{"text":"The Neon Museum"},
+                   "types":["museum"],"location":{"latitude":36.17,"longitude":-115.14}}]}"""
+            ).single().name
+        )
+        assertEquals(
+            "a",
+            GooglePlacesApiService.parsePlaceDetailsOrThrow(
+                """{"id":"a","location":{"latitude":36.17,"longitude":-115.14}}"""
+            )?.id
+        )
     }
 }

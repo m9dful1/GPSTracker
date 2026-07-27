@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONException
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.IOException
@@ -99,6 +100,26 @@ class PlacesApiService(
             }
             return sorted.take(MAX_NEARBY_RESULTS)
         }
+
+        /**
+         * [parseElementsResponse], with a body we can't read reported as the
+         * `IOException` every [PlacesApi] caller already handles.
+         *
+         * Overpass answers HTTP 200 with an HTML error page when it is
+         * overloaded, so a body that isn't JSON is the server's ordinary way
+         * of saying no — not a `JSONException` for a ViewModel to render as
+         * "Please try again" with nothing in the log to say why.
+         */
+        internal fun parseElementsResponseOrThrow(
+            json: String,
+            center: LatLng? = null
+        ): List<PointOfInterest> =
+            try {
+                parseElementsResponse(json, center)
+            } catch (e: JSONException) {
+                Timber.e(e, "Overpass response could not be parsed")
+                throw IOException("Malformed Overpass response", e)
+            }
 
         /**
          * Convert one OSM element into a domain POI, or null when it has
@@ -199,7 +220,7 @@ class PlacesApiService(
      */
     override suspend fun getNearbyPlaces(center: LatLng, radius: Int): List<PointOfInterest> {
         val response = runQuery(buildNearbyQuery(center, radius))
-        return parseElementsResponse(response, center)
+        return parseElementsResponseOrThrow(response, center)
     }
 
     /**
@@ -210,7 +231,7 @@ class PlacesApiService(
             ?: throw IOException("Not an OSM place id: $placeId")
 
         val response = runQuery(query)
-        return parseElementsResponse(response).firstOrNull()
+        return parseElementsResponseOrThrow(response).firstOrNull()
             ?: throw IOException("Place not found: $placeId")
     }
 
