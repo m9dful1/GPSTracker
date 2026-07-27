@@ -2169,3 +2169,118 @@ the driver has been, and a route overview leaving nothing owed.
 `MainActivity` is **1460 → 1401 lines**. Three rounds of extraction have taken
 it from 1512, which is honest progress and not a transformation — what changed
 is that four more decisions inside it are now answerable without a car.
+
+---
+
+# Round 4
+
+A fourth pass, after round 3. The reading went to the last places nobody had
+read closely: the ViewModels, the ads and consent layer, and
+`LocationAwarenessServiceImpl` — the file that derives every geofence the guide
+reacts to.
+
+## Baseline at round 4
+
+- **467 unit tests**, 0 failures (434 at the start of round 3).
+- `lintDebug` **1 warning** (`targetSdk`), 0 errors.
+- **2 compiler warnings**, both known and documented.
+- `MainActivity` 1401 lines, `TourModeService` 1228. 15.0k lines of source.
+- Open from earlier rounds, both needing a device: **B11** (`targetSdk` 36) and
+  **C6** (the MapLibre Annotation Plugin port).
+
+---
+
+## Tier 2 — silent failure
+
+### D1 · Ads are non-personalized everywhere consent isn't required — `TODO`
+
+`ConsentManager` decides personalization with one expression, written three
+times:
+
+```kotlin
+useNonPersonalizedAds = info.consentStatus != ConsentInformation.ConsentStatus.OBTAINED
+```
+
+UMP reports **`NOT_REQUIRED`** outside consent regions — most of the world,
+including this app's likely largest market. `NOT_REQUIRED` is not `OBTAINED`,
+so `npa=1` goes onto every ad request there, permanently. The app opts itself
+out of personalized advertising exactly where it is free to serve it.
+
+It errs in the user's favour, which is why nothing has caught it: no crash, no
+log, no test, and the only signal is revenue that never arrives. But it is
+plainly not what the code means — `NOT_REQUIRED` means consent was not needed,
+not that it was refused.
+
+**Fix:** non-personalized when consent is required and not yet given, or the
+status is unknown; personalized when it was obtained *or* was never required.
+And make it one pure function instead of three copies of an expression, so it
+can be tested — which is the only reason this was three copies of a bug rather
+than one.
+
+### D2 · The ads layer is three singletons with one test between them — `TODO`
+
+`AdRetryPolicy` is pure and tested. `ConsentManager`, `InterstitialAdManager`
+and `AdsInitializer` are `object`s whose every method takes an `Activity`,
+`Context` or `Application`, so nothing in them can be exercised — and D1 lives
+in exactly that gap, which is now the fourth time this audit has found a defect
+inside an untestable Android singleton (A19, C1, and B7's watcher before it).
+
+**Fix:** not a rewrite of the ads layer. The decisions worth pulling out are
+small and few: the consent-status mapping (D1), and whether an ad may load at
+all given tier, consent and an ad already in flight. The Android calls can stay
+exactly where they are.
+
+---
+
+## Tier 3 — housekeeping
+
+### D3 · Every service teardown that never toured logs an error — `TODO`
+
+Mine, from B5. `releaseTourResources` calls `stopProximityMonitoring()`
+unconditionally — which was the point, since the failed tours it exists for
+never reached a clean stop. But that method calls
+`context.unregisterReceiver(batteryReceiver)`, and a receiver that was never
+registered throws `IllegalArgumentException`, caught and logged at **error**
+level.
+
+So a service that starts, receives a control it can't act on and stops — the
+`TourCommand.NONE` path A4 added — now writes "Error unregistering battery
+receiver" on the way out, every time. The release is right; the noise is not,
+and error-level logs that are routine are how real ones get missed.
+
+**Fix:** the receiver's registration is state like any other. Track it, and
+unregister only what was registered.
+
+### D4 · A developer's phone is hardcoded in the consent settings — `TODO`
+
+`ConsentManager.buildConsentRequestParameters` carries
+`addTestDeviceHashedId("38F6DC6...")` under `BuildConfig.DEBUG`. It is one
+person's device, it means nothing to anyone else who clones this, and it fails
+silently — a debug build on any other phone simply doesn't get the EEA test
+form it was meant to guarantee.
+
+**Fix:** read it from `local.properties` like the API keys, so each developer
+gets their own and a clone without one still builds.
+
+---
+
+## Round 4 progress log
+
+Newest last.
+
+### Round 4 opened — audit recorded
+
+Read `PlacesViewModel`, the four files of the ads layer,
+`LocationAwarenessServiceImpl` and `LocationCadence`. Found one silent defect
+(D1), the untestable surface it lives in (D2), one error-level log I introduced
+myself in B5 (D3), and one hardcoded developer detail (D4).
+
+**Checked and found nothing to report in:** `LocationCadence` and the cadence
+re-registration around it — `stopProximityMonitoring` resets
+`requestedIntervalMs`, so a second tour in the same process re-registers its
+listener properly, which was the failure I went looking for.
+`InterstitialAdManager` holds an `Activity` only inside a callback on an ad it
+nulls on dismissal. `PlacesViewModel`'s repeated `launchIn(viewModelScope)`
+collections all terminate, so they accumulate nothing; two overlapping nearby
+fetches can land out of order, which costs a stale POI list for one refresh and
+nothing else.
