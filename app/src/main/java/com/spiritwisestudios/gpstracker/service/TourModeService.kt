@@ -531,7 +531,7 @@ class TourModeService : Service() {
     private fun endTour(finalState: TourModeState) {
         releaseTourResources()
         _serviceState.value = finalState
-        stopForeground(true)
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
