@@ -1814,3 +1814,162 @@ Tests: **434, 0 failures** (5 new). Every commit ran `assembleDebug`,
 `testDebugUnitTest`, `compileReleaseKotlin`, `lintDebug` and `assembleRelease`
 — R8 and the resource shrinker included, because a toolchain change is exactly
 where they break.
+
+---
+
+# Round 3
+
+A third pass, after round 2's eleven tasks. The reading went where rounds 1 and
+2 spent least time: the narration pipeline (`ContentServiceImpl`), the TTS
+engine (`AudioServiceImpl`), the Room content cache, and the compiler's own
+warnings — which are now worth listening to, because there are only 34 of them
+and 24 are one library's deprecations.
+
+## Baseline at round 3
+
+- **434 unit tests**, 0 failures (382 at the start of round 2).
+- `lintDebug` **1 warning**, 0 errors (78 at the start of round 2).
+- 34 compiler warnings, of which 24 are MapLibre's deprecated annotation API.
+- AGP 9.3.1, Gradle 9.6.1, Kotlin 2.3.10 (compiled by AGP), KSP 2.3.10,
+  compileSdk 37, targetSdk 35.
+- `MainActivity` 1460 lines, `TourModeService` 1228. 14.7k lines of source,
+  5.5k of tests.
+
+Round 2 ended with the project's dependencies current and its lint clean. What
+it did not touch is the piece the whole app is *for*: the voice.
+
+---
+
+## Tier 1 — breaks in normal use
+
+### C1 · Pausing during a turn prompt loses the story and silences the tour — `TODO`
+
+`AudioServiceImpl` parks an interrupted narration in a single `pendingResume`
+slot so a navigation prompt can speak over it and hand the floor back.
+`pause()` writes to that same slot **unconditionally**:
+
+```kotlin
+override fun pause(): Boolean {
+    synchronized(lock) {
+        val active = current ?: return false
+        if (isPaused) return false
+        pendingResume = PendingNarration(active.text, lastSpeakingPosition, active.channel)
+```
+
+So when the thing being paused *is* a prompt, the parked narration is
+overwritten and its channel is dropped without ever being closed. The sequence
+is ordinary:
+
+1. A story is playing. `current` = the narration.
+2. A turn comes up. `speakPriority` parks the narration and speaks the prompt.
+3. The listener taps pause on the notification — or a call arrives, and
+   `AUDIOFOCUS_LOSS_TRANSIENT` calls `pause()` for them.
+
+The story's flow is now referenced by nothing and is never closed, so
+`NarrationDelivery`'s `collectLatest` never returns, so its
+`finally { session.endDelivery(...) }` never runs. **`TourSession.isDelivering`
+stays true for the rest of the tour**: no further story can be delivered (the
+delivery gate is held) and the quiet-stretch filler sees `narrationBusy()`
+forever. The guide goes permanently silent, and only stopping the tour clears
+it.
+
+Resume makes it worse in a smaller way: the prompt is restarted as
+`isPrompt = false`, so it is treated as narration on completion.
+
+**Fix:** pausing a prompt must not evict the narration behind it. Losing the
+tail of "turn left in 200 feet" is fine; losing the story is not — and wedging
+the delivery gate is worse than either.
+
+---
+
+## Tier 2 — untested where it matters
+
+### C2 · The audio state machine is the last stateful piece with no tests — `TODO`
+
+`AudioServiceImplTest` has 13 cases and every one of them tests a pure helper:
+`resumeTextFrom`, `progressFraction`, `languageUsable`. The state machine those
+helpers serve — `current`, `pendingResume`, `isPaused`, `lastSpeakingPosition`,
+and the interleaving of `speak`, `speakPriority`, `pause`, `resume`, `stop`,
+audio-focus callbacks and utterance callbacks — has **no coverage at all**.
+C1 lives in exactly that gap.
+
+This is round 1's lesson for the fourth time: the logic is untestable because
+it sits inside an Android class. Except here it barely touches Android —
+`TextToSpeech.speak/stop`, and the audio-focus request. Everything else is
+bookkeeping, which is what `TourSession` already is for the tour.
+
+**Fix:** the shape that worked three times already. Pull the utterance
+bookkeeping into a pure class with the engine behind a small interface
+(`speak(id, text)`, `stop()`, focus request/abandon), and write the
+interleavings down as tests — starting with the one in C1.
+
+### C3 · Room's destructive-migration escape hatch is deprecated — `TODO`
+
+`AppDatabase` calls `.fallbackToDestructiveMigrationFrom(1)`, and Room 2.8
+deprecates it in favour of an overload that makes you say whether *all* tables
+are dropped. The distinction is the point: the old call drops only the tables
+Room knows about.
+
+This is A14's line of defence — version 1 predates schema export and is the
+only version allowed to be rebuilt, everything later must migrate or fail
+loudly. That reasoning is only as good as the call implementing it, and the
+call is now deprecated with a behavioural question attached.
+
+**Fix:** move to the explicit overload, and say in the comment which answer was
+chosen and why.
+
+---
+
+## Tier 3 — housekeeping
+
+### C4 · MapLibre's annotation API is deprecated out from under us — `TODO`
+
+24 of the project's 34 compiler warnings are one thing: `Marker`,
+`MarkerOptions`, `Polyline`, `PolylineOptions`, `Polygon`, `PolygonOptions`,
+`addMarker`, `removeMarker`, `setOnMarkerClickListener` — the whole annotation
+API `MapLibreMapController` and `MarkerIcons` are built on. MapLibre replaced
+it with style layers and sources.
+
+This is not urgent — deprecated is not removed — but it is the largest single
+block of warnings in the project, it is a rewrite rather than a rename, and it
+gets harder the longer the POI-marker code grows against the old API.
+
+**Fix:** a separate, deliberate pass over `MapLibreMapController`, moving
+markers to a `SymbolLayer` with a `GeoJsonSource` and the route to a
+`LineLayer`. Google's controller is unaffected; the `MapController` interface
+is the seam that makes this a one-file change.
+
+### C5 · `MainActivity` is still the biggest file — `TODO`
+
+1460 lines, after B9 took the navigation state machine out. What is left is
+still several jobs: map camera work, service binding, permissions, ads, the
+tour lifecycle, the journal and settings sheets, and the location listener.
+
+**Fix:** as before, one extraction at a time and only where a decision comes
+with it. The camera work is the strongest candidate — `CameraLogic` is already
+pure and tested, but *when* to drive, follow, or settle back is still spread
+across four callbacks.
+
+---
+
+## Round 3 progress log
+
+Newest last.
+
+### Round 3 opened — audit recorded
+
+Read `ContentServiceImpl`, `AudioServiceImpl`, the Room content cache and DAO,
+and the compiler's warnings in full. Found one Tier 1 defect (C1), the untested
+surface it hides in (C2), one deprecation on the data path (C3), and two
+housekeeping items (C4, C5). No code changes in this entry.
+
+**Checked and found nothing to report in:** `ContentServiceImpl` — the cache is
+keyed by `poi_id` as its primary key, so the "regenerate for the other tier"
+path really does replace rather than accumulate, `cleanForSpeech` unwraps
+nested parentheticals innermost-first, and `trimToNewest` is correct against a
+primary-key column. `TourContentDao` and `TourContentEntity` agree on every
+column. The `Condition is always 'true'` warning in `NavigationServiceImpl:279`
+is a smart-cast artefact of the null check at line 245, not a missing guard.
+
+**Carried over from round 2:** B11 (`targetSdk` 35 → 36), which needs a device
+rather than a build and is the last lint warning in the project.
