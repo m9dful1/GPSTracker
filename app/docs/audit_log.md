@@ -1229,7 +1229,7 @@ and what that means for the camera, the card and the voice.
 `NavState` and the transitions, with a `Host` for the views and the map. The
 activity keeps the view wiring and nothing else about navigation.
 
-### B10 · Everything behind the AGP 9 wall — `TODO`
+### B10 · Everything behind the AGP 9 wall — `DONE`
 
 Opened by B8, which took every upgrade the current toolchain accepts and found
 that the rest are not independent bumps at all — they are one migration wearing
@@ -1256,6 +1256,28 @@ eleven hats. The 19 warnings that remain:
 **Fix:** AGP 9 and Kotlin 2.4 first, together, because nothing else moves until
 they do. Then the AndroidX and Hilt versions fall out for free. OkHttp 5 and the
 Play Services majors are separate reading each. `targetSdk` last.
+
+### B11 · `targetSdk` 35 → 36 — `TODO`
+
+The last lint warning in the project, and the one change in this whole audit
+whose effects are invisible to every gate available here. `compileSdk` is 37
+and every dependency is current; only `targetSdk = 35` remains.
+
+Raising it opts the app into Android 16's behaviour changes, and this app sits
+in the middle of the ones that matter: a **foreground location service**,
+**posted notifications**, and a **full-screen map drawn under the system bars**
+with insets applied by hand. Nothing in the build, the 434 unit tests, lint or
+R8 can tell anyone whether a service still starts, a notification still shows,
+or the map still clears the status bar.
+
+**Fix:** change the one line, then run it. What to check on a device, in this
+order — start a tour and confirm the foreground notification appears and the
+service survives leaving the app; confirm narration still plays; drive a route
+and confirm the turn card and the nav card are not under the status bar or
+gesture inset; confirm the back gesture still leaves the activity cleanly
+(Android 16 turns predictive back on by default, and this app registers no
+`OnBackPressedCallback`); confirm the consent dialog and a test ad still
+appear. Anything that fails is a real finding for round 3.
 
 ---
 
@@ -1730,3 +1752,65 @@ because it is the same sentence `APPROACHING` uses.
 `MainActivity` is **1521 → 1460 lines**, and the presenter is 227. As in B7,
 the line count is not the win — the win is that the navigation state machine
 can be interrogated without a car.
+
+### B10 — "Take the wall down, in the order it had to come down"
+
+**19 lint warnings → 1**, in five commits. The one left is `targetSdk`, which
+is now **B11** and needs a device, not a build.
+
+| Commit | What moved |
+| --- | --- |
+| `Move onto AGP 9, Gradle 9.5 and AGP's built-in Kotlin` | AGP 9.3.1, Gradle 9.5, Kotlin 2.3.10 via AGP, KSP 2.3.10, Hilt 2.60.1 |
+| `Take the eleven upgrades that were waiting on AGP 9` | compileSdk 37; core-ktx 1.19.0, activity 1.13.0, lifecycle 2.11.0, datastore 1.2.1, Room 2.8.4 |
+| `Move to OkHttp 5, and test it over a real socket` | OkHttp 5.4.0 + MockWebServer, 5 new tests |
+| `Upgrade Play Services and the Gradle wrapper` | Gradle 9.6.1, Maps 20.0.0, Ads 25.4.0, UMP 4.0.0 |
+
+**AGP 9 is not a version bump, it is a change of who compiles Kotlin.** It
+brings built-in Kotlin support enabled by default, and that cannot sit beside
+`org.jetbrains.kotlin.android`: the first attempt failed casting AGP's new
+extension to the old `BaseExtension`, and once Kotlin was new enough to
+recognise the situation it said so outright — "not compatible with AGP's 9.0
+new DSL". The documented opt-out (`android.builtInKotlin=false`) does not help,
+because the new DSL is the part that collides. So the Kotlin plugin is gone
+from both build files and the catalog, `kotlinOptions` moved to
+`kotlin.compilerOptions`, and `jvmTarget` is inherited from
+`compileOptions.targetCompatibility` instead of being repeated.
+
+**Kotlin stops at 2.3.10, not the 2.4.10 lint asks for.** KSP is how this
+project processes Room and Hilt, and KSP's newest release is 2.3.10. Lint
+reports the Kotlin compiler's latest version without knowing what else in the
+build depends on it.
+
+**Hilt had to move in the same commit, not after it.** 2.57.2 fails to apply
+under AGP 9 ("Android BaseExtension not found") and 2.60.1 is the version that
+*requires* AGP 9. There is no ordering in which they are two changes.
+
+**Then everything else fell out, exactly as B10 predicted.** compileSdk 37 and
+five AndroidX upgrades landed in one commit with nothing to fix — including
+Room 2.8.4, whose `AbstractMethodError` in `FieldBundle$$serializer` was the
+old KSP's kotlinx-serialization runtime all along. **The committed schema JSON
+is unchanged for the third time**, which is the check that matters for Room.
+
+**OkHttp 5 compiled unchanged — so I went and got some evidence.** The app uses
+a handful of stable APIs and none of them moved, but "it compiled" is not a
+test of the library every feature in this app talks through. OkHttp ships
+MockWebServer, so `GeocodingOverHttpTest` now drives a geocoder over a real
+socket: a well-formed response with the query, language and bias checked on the
+way out; an **HTML error page served with HTTP 200**, which is what a public
+geocoder actually does when it is unhappy; an error status; a refused
+connection; and a blank query that never reaches the network. That also closes
+a hole B4 named out loud — it gave every API service a guarded parse and said
+plainly that the `try` around the request stayed unexercised for want of a test
+server.
+
+**The Play Services majors turned out to be version changes, not migrations.**
+Maps 20, Ads 25 and UMP 4 all compile against the map controller, the ad
+managers and the consent flow untouched. What that does *not* establish is
+whether a consent dialog still appears or an ad still fills, and nothing here
+can. That part of this app has never been verifiable in this environment and
+still isn't.
+
+Tests: **434, 0 failures** (5 new). Every commit ran `assembleDebug`,
+`testDebugUnitTest`, `compileReleaseKotlin`, `lintDebug` and `assembleRelease`
+— R8 and the resource shrinker included, because a toolchain change is exactly
+where they break.
