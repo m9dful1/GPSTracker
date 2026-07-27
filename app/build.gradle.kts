@@ -1,8 +1,9 @@
 import java.util.Properties
 
 plugins {
+    // No Kotlin plugin: AGP 9 compiles Kotlin itself, and applying
+    // org.jetbrains.kotlin.android alongside its new DSL is an error
     alias(libs.plugins.androidApplication)
-    alias(libs.plugins.jetbrainsKotlinAndroid)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hiltAndroid)
 }
@@ -104,16 +105,16 @@ android {
         // java.time below API 26
         isCoreLibraryDesugaringEnabled = true
     }
-    kotlinOptions {
-        jvmTarget = "17"
-        freeCompilerArgs += listOf(
-            "-Xjvm-default=all",
-            "-Xsam-conversions=class"
-        )
-    }
     buildFeatures {
         viewBinding = true
         buildConfig = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        // jvmTarget follows compileOptions.targetCompatibility above
+        freeCompilerArgs.addAll("-Xjvm-default=all", "-Xsam-conversions=class")
     }
 }
 

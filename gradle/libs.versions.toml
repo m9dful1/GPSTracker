@@ -1,7 +1,7 @@
 [versions]
-agp = "8.13.2"
-kotlin = "2.1.0"
-ksp = "2.1.0-1.0.29"
+agp = "9.3.1"
+kotlin = "2.3.10"
+ksp = "2.3.10"
 coreKtx = "1.16.0"
 junit = "4.13.2"
 junitVersion = "1.3.0"
@@ -20,7 +20,7 @@ okhttp = "4.12.0"
 gson = "2.14.0"
 # One version for the Hilt plugin and both Hilt artifacts: they have to
 # match, and a single ref makes that structural rather than a coincidence.
-hilt = "2.57.2"
+hilt = "2.60.1"
 timber = "5.0.1"
 desugarJdkLibs = "2.1.5"
 maplibre = "13.4.1"
@@ -72,6 +72,5 @@ json = { group = "org.json", name = "json", version.ref = "json" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }
-jetbrainsKotlinAndroid = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 hiltAndroid = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
