@@ -1257,7 +1257,7 @@ eleven hats. The 19 warnings that remain:
 they do. Then the AndroidX and Hilt versions fall out for free. OkHttp 5 and the
 Play Services majors are separate reading each. `targetSdk` last.
 
-### B11 · `targetSdk` 35 → 36 — `TODO`
+### B11 · `targetSdk` 35 → 36 — `DONE`
 
 The last lint warning in the project, and the one change in this whole audit
 whose effects are invisible to every gate available here. `compileSdk` is 37
@@ -2781,3 +2781,86 @@ question, and two of the three found nothing — which is worth as much as a
 finding, because it bounds where the same class of bug can still be hiding. The
 work with the most value left in this project is not another round. It is
 **B11** and **C6**, and both need a device.
+
+---
+
+# Round 8
+
+A verification round, and then a task that turned out not to need a device
+after all.
+
+## Baseline at round 8
+
+- **481 unit tests**, 0 failures; `lintDebug` 1 warning; 2 compiler warnings.
+- Sole remaining open task: **C6** (the MapLibre Annotation Plugin port).
+
+## Verified, with evidence — no findings
+
+**A18's R8 keep rules still hold under AGP 9's R8.** This needed checking
+because B10 replaced the whole toolchain, and A18's rules were verified against
+AGP 8. From this build's `mapping/release/`:
+
+- `seeds.txt` lists `double latitude` and `double longitude` as matched by the
+  keep rule, and `usage.txt` removes nothing from `LatLng` — so the Gson field
+  names that *are* the on-disk format survive.
+- Every persisted enum keeps its constants by name: `PREMIUM -> PREMIUM`,
+  `BRIEF -> BRIEF`, `AI_GENERATED -> AI_GENERATED`.
+- The absence of field lines in `LatLng`'s `mapping.txt` block is not a
+  removal — `mapping.txt` records members whose name or signature *changed*,
+  which is why the enums appear (their types were renamed) and `LatLng`'s
+  unrenamed fields do not. Worth writing down, because it looks alarming and
+  isn't.
+
+**The resource shrinker keeps G1's new strings.** They are referenced only from
+Kotlin, so `resources.txt` was the check: each is listed `reachable from Field
+int R$string.…`.
+
+**The backup and data-extraction rules are sound.** Both files include the
+database and the DataStore directory and nothing else, the two formats agree,
+and the reasoning — journal and settings travel, consent state is per-device,
+`TRUNCATE` journal mode keeps the database a single restorable file — is already
+written in them.
+
+---
+
+## Round 8 progress log
+
+### B11 — "targetSdk 36, on the evidence"
+
+**I deferred this three times, and the deferral was over-cautious.** The reason
+given each time was that the effects are invisible to every gate available here.
+So this round enumerated the effects instead, from Android 16's own
+behaviour-changes documentation, and checked each against the code:
+
+| Change for apps targeting 36 | This app |
+| --- | --- |
+| Edge-to-edge enforced, no opt-out | Never used `windowOptOutEdgeToEdgeEnforcement`; already edge-to-edge at 35 and applies insets itself in `applyWindowInsets` |
+| Predictive back on; `onBackPressed()` not called, `KEYCODE_BACK` not dispatched | Overrides neither and registers no `OnBackPressedCallback` — nothing to migrate |
+| Orientation and resizability restrictions ignored on ≥600dp | The manifest pins no `screenOrientation`, `resizableActivity` or aspect ratio — there is nothing to ignore, so large-screen behaviour is identical before and after |
+| Granular health permissions replace `BODY_SENSORS` | Requests neither |
+| Notifications | No behaviour change at 36 |
+| TextToSpeech | No behaviour change at 36 |
+
+**Two of my own earlier claims were wrong and are corrected here.** B8 and B10
+said this change was risky because "this app runs a foreground location service,
+posts notifications and draws under the system bars — three of the areas that
+change most between releases". For API 36 specifically, notifications and
+foreground-service location are *not* changed by targeting it, and the
+insets work was already done at 35. The list above is what the platform actually
+says.
+
+So the change is one line, and the gate passes: debug, release with R8, lint and
+481 tests.
+
+**What is still not verified, stated plainly:** the app has not been run. The
+one residual risk the table leaves is *appearance* rather than behaviour — a
+full-screen map with hand-applied insets on a large screen, in an orientation
+the app never had to handle. That risk is unchanged by this commit, because
+nothing was pinning orientation before it either.
+
+**The lint warning stays, and the reason is not the same one.** `OldTargetApi`
+now fires because `compileSdk` is **37** and lint wants `targetSdk` to match.
+Going to 37 would mean opting into a platform release whose behaviour-change
+documentation this round did not read — which is the mistake the table above
+exists to avoid. 36 is the evidence-backed step; 37 is a separate deliberate one,
+and until it happens the warning is accurate rather than stale.
