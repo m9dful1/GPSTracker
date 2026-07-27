@@ -22,8 +22,11 @@ object VoiceSliders {
     /** Fastest/highest the engine is asked for. */
     const val MAX = 2.0f
 
-    /** `android:max` for both sliders; 0.05 per step across [MIN]..[MAX]. */
+    /** `android:max` for the SeekBars; 0.05 per step across [MIN]..[MAX]. */
     const val STEPS = 30
+
+    /** The gap between adjacent positions, for a Material `Slider`'s stepSize. */
+    const val STEP = (MAX - MIN) / STEPS
 
     // Integer hundredths, so a position maps to the nearest float to a round
     // decimal rather than accumulating a multiply's error
@@ -35,6 +38,18 @@ object VoiceSliders {
         val steps = progress.coerceIn(0, STEPS)
         return (MIN_HUNDREDTHS + steps * STEP_HUNDREDTHS) / 100f
     }
+
+    /**
+     * The nearest value on the scale to [value], clamped into range.
+     *
+     * A Material `Slider` refuses anything that is not `valueFrom` plus a whole
+     * number of steps — it throws `IllegalStateException` — so a stored
+     * multiplier has to be put on the grid before it is handed to one. That is
+     * not defensive: the place-details dialog crashed on values the settings
+     * sheet stores as a matter of course, because the two disagreed about which
+     * values exist.
+     */
+    fun onGrid(value: Float): Float = valueFor(progressFor(value))
 
     /**
      * The slider position for a stored multiplier: **nearest**, not rounded

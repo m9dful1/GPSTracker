@@ -2541,7 +2541,7 @@ and it is one **this session's own E2 fix walked past**.
 
 ## Tier 1 — breaks in normal use
 
-### F1 · The voice-settings dialog crashes on a value the settings sheet stores — `TODO`
+### F1 · The voice-settings dialog crashes on a value the settings sheet stores — `DONE`
 
 There are two places to set voice speed and pitch: the tour settings sheet, and
 a **Voice Settings** dialog inside a place's details sheet. They disagree about
@@ -2637,3 +2637,42 @@ resolution.
 code nobody had read. This round had less to find, and most of what it read was
 sound. The highest-value work left in the project is the two device-gated tasks,
 not more reading.
+
+### F1 — "One scale, and both sliders on it"
+
+`VoiceSliders` gained `STEP` and `onGrid`, and the place-details dialog now takes
+its range, its step **and** its value from there:
+
+```kotlin
+slider.valueFrom = VoiceSliders.MIN
+slider.valueTo = VoiceSliders.MAX
+slider.stepSize = VoiceSliders.STEP
+slider.value = VoiceSliders.onGrid(stored ?: UserPreferences().voiceSpeed)
+```
+
+Set in that order, because a `Slider` validates its value against the range and
+step it has at the time. The layout's `stepSize` moved from 0.1 to 0.05 to
+match, though the code now overrides all three — the XML agreeing is for whoever
+reads it next.
+
+**`onGrid` is the part that makes it safe rather than merely consistent.** Both
+UIs sharing a scale fixes values the sheet writes from now on; it does nothing
+for what is *already* stored — an install that saved 0.95 under the old 0.075
+scale, or a preferences file restored from another device, or one edited by hand.
+`onGrid` puts anything on the grid before a `Slider` sees it, so the crash is
+closed for values this app never produced either.
+
+**How the crash was established, since it needed evidence rather than a hunch:**
+I read the string out of `BaseSlider` in the material 1.14.0 AAR —
+`Value(%s) must be equal to valueFrom(%s) plus a multiple of stepSize(%s)` —
+rather than assuming Material validated the value at all. Then counted the
+positions: 15 of 21 under the old scale, including the stored default; 15 of 31
+under the new one.
+
+Tests: **3 new cases (481 total, 0 failures)** — every position on the scale
+satisfying Material's rule exactly, anything stored (including 0.95, 1.025,
+1.475, 0.1 and 7) landing on the grid, and a value already on the grid being
+left alone. The first of those is the one that would have caught F1: it asserts
+the property Material enforces, on the scale both UIs use.
+
+**Left for the next tick:** F2 and F3, both housekeeping.

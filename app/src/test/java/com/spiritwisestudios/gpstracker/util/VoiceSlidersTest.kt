@@ -74,6 +74,49 @@ class VoiceSlidersTest {
     }
 
     @Test
+    fun `every value the sheet can store is one a Material Slider accepts`() {
+        // The F1 crash. A Material Slider throws IllegalStateException unless
+        // the value is valueFrom plus a whole number of steps, and the
+        // place-details dialog hands it whatever is stored. Both ends use this
+        // scale now, so every position must satisfy that rule exactly.
+        for (progress in 0..VoiceSliders.STEPS) {
+            val value = VoiceSliders.valueFor(progress)
+            val steps = (value - VoiceSliders.MIN) / VoiceSliders.STEP
+            assertEquals(
+                "$value is not valueFrom plus a whole number of steps",
+                Math.round(steps).toFloat(),
+                steps,
+                1e-4f
+            )
+        }
+    }
+
+    @Test
+    fun `anything stored is put on the grid before a Slider sees it`() {
+        // Including values no slider produced: an older install's 0.075 scale,
+        // a restored preferences file, a hand-edited one
+        for (stored in listOf(0.95f, 1.025f, 1.175f, 1.475f, 0.1f, 7f, 1.37f)) {
+            val onGrid = VoiceSliders.onGrid(stored)
+            val steps = (onGrid - VoiceSliders.MIN) / VoiceSliders.STEP
+            assertEquals(
+                "$stored became $onGrid, which is off the grid",
+                Math.round(steps).toFloat(),
+                steps,
+                1e-4f
+            )
+            assertEquals(onGrid, VoiceSliders.valueFor(VoiceSliders.progressFor(onGrid)), 1e-6f)
+        }
+    }
+
+    @Test
+    fun `a value already on the grid is left alone`() {
+        for (progress in 0..VoiceSliders.STEPS) {
+            val value = VoiceSliders.valueFor(progress)
+            assertEquals(value, VoiceSliders.onGrid(value), 1e-6f)
+        }
+    }
+
+    @Test
     fun `values outside the range are clamped rather than escaping it`() {
         assertEquals(0, VoiceSliders.progressFor(0.1f))
         assertEquals(VoiceSliders.STEPS, VoiceSliders.progressFor(9f))

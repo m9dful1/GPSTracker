@@ -17,7 +17,9 @@ import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.TourContent
 import com.spiritwisestudios.gpstracker.domain.service.AudioService
 import com.spiritwisestudios.gpstracker.data.repository.TourContentRepository
+import com.spiritwisestudios.gpstracker.domain.model.UserPreferences
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
+import com.spiritwisestudios.gpstracker.util.VoiceSliders
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -258,10 +260,22 @@ class PlaceDetailsBottomSheet : BottomSheetDialogFragment() {
         val dialogBinding = DialogVoiceSettingsBinding.inflate(layoutInflater)
         val currentPreferences = placesViewModel.userPreferences.value
         
-        // Set initial values based on current preferences
+        // Set initial values based on current preferences. Both sliders take
+        // their range and step from VoiceSliders — the same scale the settings
+        // sheet uses — and the stored value is put on that grid before it is
+        // handed over: a Material Slider throws IllegalStateException for a
+        // value that is not valueFrom plus a whole number of steps, and the
+        // settings sheet stores off-grid values as a matter of course.
         dialogBinding.switchAudioEnabled.isChecked = currentPreferences?.audioEnabled ?: true
-        dialogBinding.sliderVoiceSpeed.value = currentPreferences?.voiceSpeed ?: 1.0f
-        dialogBinding.sliderVoicePitch.value = currentPreferences?.voicePitch ?: 1.0f
+        for ((slider, stored) in listOf(
+            dialogBinding.sliderVoiceSpeed to currentPreferences?.voiceSpeed,
+            dialogBinding.sliderVoicePitch to currentPreferences?.voicePitch
+        )) {
+            slider.valueFrom = VoiceSliders.MIN
+            slider.valueTo = VoiceSliders.MAX
+            slider.stepSize = VoiceSliders.STEP
+            slider.value = VoiceSliders.onGrid(stored ?: UserPreferences().voiceSpeed)
+        }
         
         // Create the dialog
         MaterialAlertDialogBuilder(requireContext())
