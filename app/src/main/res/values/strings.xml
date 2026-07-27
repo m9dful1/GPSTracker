@@ -29,6 +29,19 @@
     <string name="clear_story_cache">Clear cached stories</string>
     <string name="story_cache_cleared">Cached stories cleared</string>
 
+    <!-- Tour service notification. The channel names below are the settings
+         screen's; these are what the notification itself says. -->
+    <string name="notification_approaching">Approaching %1$s</string>
+    <plurals name="notification_watching_route">
+        <item quantity="one">Watching %d interesting place along your route</item>
+        <item quantity="other">Watching %d interesting places along your route</item>
+    </plurals>
+    <string name="notification_audio_paused_title">Audio Paused</string>
+    <string name="notification_audio_paused">Paused narration for %1$s</string>
+    <string name="notification_audio_playing_title">Playing Audio</string>
+    <string name="notification_audio_playing">Playing narration for %1$s</string>
+    <string name="notification_unknown_place">this place</string>
+
     <!-- Notification channels -->
     <string name="channel_service_name">Tour Mode Service</string>
     <string name="channel_service_description">Shows the status of the tour guide service</string>

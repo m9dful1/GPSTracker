@@ -298,7 +298,11 @@ class TourModeService : Service() {
         // startForeground() call. Redundant calls just update the notification.
         startForeground(
             NOTIFICATION_ID,
-            createNotification("Tour Mode Active", "Discovering interesting places nearby...", NOTIFICATION_CHANNEL_SERVICE)
+            createNotification(
+                getString(R.string.tour_mode_active),
+                getString(R.string.tour_mode_discovering),
+                NOTIFICATION_CHANNEL_SERVICE
+            )
         )
 
         when (command) {
@@ -599,8 +603,10 @@ class TourModeService : Service() {
                 }
 
                 updateNotification(
-                    "Tour Mode Active",
-                    "Watching ${places.size} interesting places along your route",
+                    getString(R.string.tour_mode_active),
+                    resources.getQuantityString(
+                        R.plurals.notification_watching_route, places.size, places.size
+                    ),
                     NOTIFICATION_CHANNEL_SERVICE
                 )
             } catch (e: Exception) {
@@ -743,7 +749,11 @@ class TourModeService : Service() {
                             generateAndQueueContent(poi, priority)
 
                             // Update notification
-                            updateNotification("Tour Mode Active", "Approaching ${poi.name}", NOTIFICATION_CHANNEL_SERVICE)
+                            updateNotification(
+                                getString(R.string.tour_mode_active),
+                                getString(R.string.notification_approaching, poi.name),
+                                NOTIFICATION_CHANNEL_SERVICE
+                            )
                         }
                     }
                     "exit" -> {
@@ -1142,21 +1152,29 @@ class TourModeService : Service() {
     /**
      * Handle play/pause action from notification.
      */
+    /**
+     * The place the guide is talking about, for the playback notification.
+     * Falls back to a phrase rather than a name: the way-of-life filler is
+     * about a region and has no [currentPoi] at all, and "Unknown location"
+     * read like an error for something that is working correctly.
+     */
+    private fun narratingPlaceName(): String =
+        currentPoi?.name ?: getString(R.string.notification_unknown_place)
+
     private fun handlePlayPauseAction() {
         serviceScope.launch {
             if (audioService.isSpeaking()) {
                 audioService.pause()
                 updateNotification(
-                    "Audio Paused",
-                    "Paused narration for ${currentPoi?.name ?: "Unknown location"}",
+                    getString(R.string.notification_audio_paused_title),
+                    getString(R.string.notification_audio_paused, narratingPlaceName()),
                     NOTIFICATION_CHANNEL_PLAYBACK
                 )
             } else {
                 audioService.resume()
-                val poiName = currentPoi?.name ?: "Unknown location"
                 updateNotification(
-                    "Playing Audio",
-                    "Playing narration for $poiName",
+                    getString(R.string.notification_audio_playing_title),
+                    getString(R.string.notification_audio_playing, narratingPlaceName()),
                     NOTIFICATION_CHANNEL_PLAYBACK
                 )
             }

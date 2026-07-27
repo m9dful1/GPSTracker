@@ -2701,3 +2701,83 @@ already tested, and it was already right.
 remains open across all six rounds is **B11** (`targetSdk` 36) and **C6** (the
 MapLibre Annotation Plugin port), both of which need a device rather than a
 build.
+
+---
+
+# Round 7
+
+A seventh pass, and a different method: rather than read files a fourth time,
+this round swept for the **patterns the bugs already found predict**. Three
+sweeps, one finding.
+
+## Baseline at round 7
+
+- **481 unit tests**, 0 failures.
+- `lintDebug` **1 warning** (`targetSdk`), 0 errors; 2 compiler warnings, both
+  documented.
+- Open and device-gated: **B11** (`targetSdk` 36), **C6** (MapLibre plugin port).
+
+---
+
+## Tier 3 — housekeeping
+
+### G1 · The tour notification is the last user-facing text built in code — `DONE`
+
+Every string the foreground notification shows was a Kotlin literal: "Tour Mode
+Active", "Discovering interesting places nearby...", "Approaching X", "Watching
+N interesting places along your route", "Audio Paused", "Playing narration for
+X" and the "Unknown location" it fell back to.
+
+Two of them **already existed in `strings.xml`** — `tour_mode_active` and
+`tour_mode_discovering`, written for the tour-mode card, with the notification
+carrying its own slightly different copy of the same sentence. A20 moved the
+notification *channel* names and descriptions to resources; the notification's
+own text was left behind, and nothing catches it: lint's `HardcodedText` reads
+layouts, not Kotlin.
+
+**Fix:** the existing two reused, five new strings and one plural added, and one
+`narratingPlaceName()` replacing two copies of a fallback — which also stopped
+that fallback reading "Unknown location", an error-sounding phrase for the
+way-of-life filler, which is about a region and correctly has no place at all.
+
+---
+
+## Round 7 progress log
+
+Newest last.
+
+### Round 7 opened, and closed — three sweeps, one finding
+
+**Swept for E1's shape** — a `lateinit var` assigned asynchronously and read
+from a user-triggered callback. E1 was that bug in the settings sheet, so the
+question was whether it had siblings. Every other `lateinit` in the project is
+either Hilt's `@Inject` (set before `onCreate` returns) or a view reference
+assigned in `initViews`/`onCreateView` before anything can touch it. **No
+siblings.** `PlaceDetailsBottomSheet` still holds its ViewModel in a `lateinit`
+assigned via `ViewModelProvider` rather than the `by activityViewModels()`
+delegate F3 moved the journal to — synchronous, so not E1's shape, but the same
+inconsistency in the one sheet F3 did not cover.
+
+**Swept the test suite for tests that cannot fail.** I wrote three bad tests in
+this session — two in A19 on a false premise, one in `VoiceSlidersTest` from an
+assumption rather than the arithmetic — so the suite deserved the same
+suspicion. Checked all 481 for a test function with no assertion, and every
+`assertEquals` for one comparing a value to itself. **Both came back empty.**
+
+**Swept for user-visible English built in code** rather than declared in
+`strings.xml`. That found G1, above; the sweep now returns nothing.
+
+**Recorded as deliberate, not as debt:** `ContentServiceImpl.buildFallbackContent`
+and `JournalFormatter`'s share text are still English literals, and should stay
+that way. They are *content*, not chrome — the narration pipeline is
+en.wikipedia.org and English Gemini prompts throughout, so putting the fallback
+template in `strings.xml` would advertise a translation the guide cannot
+deliver. `JournalFormatter` is deliberately free of Android so it can be pure
+and tested; giving it resources would mean giving it a `Context`.
+
+**On the method, and what is left.** Reading files found something real six
+rounds running; this round it did not, so the sweeps were the more useful
+question, and two of the three found nothing — which is worth as much as a
+finding, because it bounds where the same class of bug can still be hiding. The
+work with the most value left in this project is not another round. It is
+**B11** and **C6**, and both need a device.
