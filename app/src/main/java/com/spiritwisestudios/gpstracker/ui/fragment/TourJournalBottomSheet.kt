@@ -2,11 +2,12 @@ package com.spiritwisestudios.gpstracker.ui.fragment
 
 import android.content.Intent
 import android.os.Bundle
+import android.text.format.DateUtils
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Observer
-import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ListAdapter
@@ -19,9 +20,6 @@ import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
 import com.spiritwisestudios.gpstracker.util.JournalFormatter
 import dagger.hilt.android.AndroidEntryPoint
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * Journal of every place the tour guide has narrated, newest first.
@@ -33,7 +31,7 @@ class TourJournalBottomSheet : BottomSheetDialogFragment() {
     private var _binding: BottomSheetTourJournalBinding? = null
     private val binding get() = _binding!!
 
-    private lateinit var placesViewModel: PlacesViewModel
+    private val placesViewModel: PlacesViewModel by activityViewModels()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -47,9 +45,7 @@ class TourJournalBottomSheet : BottomSheetDialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        placesViewModel = ViewModelProvider(requireActivity())[PlacesViewModel::class.java]
-
-        val adapter = JournalAdapter { place ->
+        val adapter = JournalAdapter(::formatVisited) { place ->
             placesViewModel.selectPlace(place.placeId ?: place.id)
             PlaceDetailsBottomSheet.newInstance()
                 .show(parentFragmentManager, PlaceDetailsBottomSheet.TAG)
@@ -73,10 +69,7 @@ class TourJournalBottomSheet : BottomSheetDialogFragment() {
 
         binding.btnJournalShare.setOnClickListener {
             val places = placesViewModel.visitedPlaces.value ?: return@setOnClickListener
-            val dateFormat = SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())
-            val text = JournalFormatter.shareText(places) { millis ->
-                dateFormat.format(Date(millis))
-            }
+            val text = JournalFormatter.shareText(places, ::formatVisited)
             val sendIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_TEXT, text)
@@ -85,12 +78,28 @@ class TourJournalBottomSheet : BottomSheetDialogFragment() {
         }
     }
 
+    /**
+     * When a place was narrated, in the device's own format.
+     *
+     * `DateUtils` follows both the locale and the 12/24-hour setting, which a
+     * pattern cannot: this used to be `"MMM d 'at' h:mm a"`, so a listener on
+     * 24-hour time read "3:45 PM" here and "15:45" on the navigation card. A13
+     * and A20 fixed that for the ETA; the journal never caught up. The literal
+     * "at" was untranslated English inside a date pattern, too.
+     */
+    private fun formatVisited(millis: Long): String = DateUtils.formatDateTime(
+        requireContext(),
+        millis,
+        DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_ABBREV_MONTH
+    )
+
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
     }
 
     private class JournalAdapter(
+        private val formatVisited: (Long) -> String,
         private val onClick: (PointOfInterest) -> Unit
     ) : ListAdapter<PointOfInterest, JournalAdapter.EntryViewHolder>(DIFF) {
 
@@ -98,7 +107,7 @@ class TourJournalBottomSheet : BottomSheetDialogFragment() {
             val binding = ItemJournalEntryBinding.inflate(
                 LayoutInflater.from(parent.context), parent, false
             )
-            return EntryViewHolder(binding, onClick)
+            return EntryViewHolder(binding, formatVisited, onClick)
         }
 
         override fun onBindViewHolder(holder: EntryViewHolder, position: Int) {
@@ -107,16 +116,15 @@ class TourJournalBottomSheet : BottomSheetDialogFragment() {
 
         class EntryViewHolder(
             private val binding: ItemJournalEntryBinding,
+            private val formatVisited: (Long) -> String,
             private val onClick: (PointOfInterest) -> Unit
         ) : RecyclerView.ViewHolder(binding.root) {
-
-            private val dateFormat = SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())
 
             fun bind(place: PointOfInterest) {
                 binding.tvEntryName.text = place.name
                 binding.tvEntryMeta.text = listOfNotNull(
                     place.category,
-                    place.visitedDate?.let { dateFormat.format(Date(it)) }
+                    place.visitedDate?.let(formatVisited)
                 ).joinToString(" · ")
                 binding.root.setOnClickListener { onClick(place) }
             }

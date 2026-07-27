@@ -2582,7 +2582,7 @@ hand-edited preferences file harmless instead of fatal.
 
 ## Tier 3 — housekeeping
 
-### F2 · The journal's dates ignore the device's clock setting — `TODO`
+### F2 · The journal's dates ignore the device's clock setting — `DONE`
 
 `TourJournalBottomSheet` formats entry dates with
 `SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())`, in two places —
@@ -2599,7 +2599,7 @@ pattern too.
 follows both the locale and the 12/24-hour setting — and drops the hardcoded
 word.
 
-### F3 · One sheet reaches for its ViewModel the long way round — `TODO`
+### F3 · One sheet reaches for its ViewModel the long way round — `DONE`
 
 `TourJournalBottomSheet` uses `ViewModelProvider(requireActivity())[PlacesViewModel::class.java]`
 and a `lateinit var`, where every other fragment uses
@@ -2676,3 +2676,28 @@ left alone. The first of those is the one that would have caught F1: it asserts
 the property Material enforces, on the scale both UIs use.
 
 **Left for the next tick:** F2 and F3, both housekeeping.
+
+### F2 and F3 — "The journal catches up with the rest of the app"
+
+**F2.** One `formatVisited(millis)` on the fragment, passed to both the adapter
+and `JournalFormatter.shareText` — which already took a date renderer as a
+parameter for exactly this reason, so the formatter never needed changing; the
+callers did. It uses `DateUtils.formatDateTime` with date, time and abbreviated
+month, which follows the locale *and* the 12/24-hour setting. A listener on
+24-hour time no longer reads "3:45 PM" in the journal and "15:45" on the
+navigation card, and the untranslated `'at'` inside the old pattern is gone.
+
+The `SimpleDateFormat` the row holder built **per view holder** went with it.
+
+**F3.** `by activityViewModels()`, like every other fragment, replacing
+`ViewModelProvider(requireActivity())[...]` and the `lateinit var` it needed.
+
+No new tests, and no way to add one worth having: `DateUtils.formatDateTime`
+needs a `Context` and answers differently per device setting, which is the whole
+point of using it. The pure part — assembling the journal's share text — was
+already tested, and it was already right.
+
+**Round 6 closed.** One crash found and fixed, two pieces of housekeeping. What
+remains open across all six rounds is **B11** (`targetSdk` 36) and **C6** (the
+MapLibre Annotation Plugin port), both of which need a device rather than a
+build.
