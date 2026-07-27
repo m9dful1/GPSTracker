@@ -1842,7 +1842,7 @@ it did not touch is the piece the whole app is *for*: the voice.
 
 ## Tier 1 — breaks in normal use
 
-### C1 · Pausing during a turn prompt loses the story and silences the tour — `TODO`
+### C1 · Pausing during a turn prompt loses the story and silences the tour — `DONE`
 
 `AudioServiceImpl` parks an interrupted narration in a single `pendingResume`
 slot so a navigation prompt can speak over it and hand the floor back.
@@ -1884,7 +1884,7 @@ the delivery gate is worse than either.
 
 ## Tier 2 — untested where it matters
 
-### C2 · The audio state machine is the last stateful piece with no tests — `TODO`
+### C2 · The audio state machine is the last stateful piece with no tests — `DONE`
 
 `AudioServiceImplTest` has 13 cases and every one of them tests a pure helper:
 `resumeTextFrom`, `progressFraction`, `languageUsable`. The state machine those
@@ -1973,3 +1973,65 @@ is a smart-cast artefact of the null check at line 245, not a missing guard.
 
 **Carried over from round 2:** B11 (`targetSdk` 35 → 36), which needs a device
 rather than a build and is the last lint warning in the project.
+
+### C1 and C2 — "Keep the story when a prompt is paused"
+
+Done together, because they are the same change: the bug was unfixable-with-
+tests until the state machine had somewhere to live, and the state machine was
+worth moving because of the bug.
+
+**`SpeechSession`** now holds what `AudioServiceImpl` kept in four fields
+behind one lock — who is speaking, what was set aside, how far in, and whether
+the listener paused. Each `synchronized` block in the service became one call
+on it, and the pattern is the one `TourSession` established: every method is
+atomic, and every consequence that belongs outside the lock is *returned*
+rather than performed. `pause()` hands back the channel to notify and the
+channel to close; `supersede()` and `clear()` hand back the channels to close;
+`finish()` hands back the narration to pick up. The service does that work
+after the lock is released, exactly where it did before.
+
+**The fix is four lines inside `pause()`.** A prompt on top of a narration is
+now dropped rather than set aside, so the story underneath survives:
+
+```kotlin
+if (active.isPrompt) {
+    Pause(paused = true, close = active.channel)
+} else {
+    parked = Parked(active.text, position, active.channel)
+    Pause(paused = true, notifyPaused = active.channel)
+}
+```
+
+Losing the tail of "turn left in 200 feet" is a much smaller thing than losing
+the story — and much smaller than what actually happened, which was the story's
+flow being referenced by nothing and never closed, so `NarrationDelivery`'s
+`collectLatest` never returned, its `endDelivery` never ran, and the delivery
+gate stayed held for the rest of the tour.
+
+**I checked that the tests catch it rather than merely pass.** After writing
+them I put the old behaviour back — `parked = Parked(active.text, ...)`
+unconditionally — and re-ran: two failures, `pausing during a prompt keeps the
+story, and drops the prompt` and `resuming after that pause picks the story
+back up`. Then restored the fix and re-ran green. A19 is why: the tests I wrote
+there passed against a premise that was wrong, and a test that cannot fail is
+not evidence.
+
+Tests: **17 new cases (451 total, 0 failures)** covering the interleavings that
+had none — a prompt handing the floor back when it finishes, a prompt that
+finishes *while paused* leaving the story for the listener rather than starting
+it unasked, a newer prompt replacing an older one without disturbing the story,
+a new narration superseding both, a refused audio-focus resume being put back,
+a collector going away as the current speaker versus as a stale one, and the
+position only being recorded for the utterance actually speaking.
+
+`AudioServiceImpl` is 525 → 446 lines with 231 lines of `SpeechSession` beside
+it, and for once the arithmetic is beside the point in the other direction: the
+new file is not extracted *logic*, it is extracted *state*, and it is the state
+that was wrong.
+
+**Left alone deliberately:** the `isClosedForSend` check in
+`handleUtteranceFinished` is still a delicate API and still the one compiler
+warning in this file. It guards against resuming into a collector that has gone
+away, and the race it admits — the channel closing between the check and the
+resume — ends with an utterance nobody hears rather than a wedged tour. Worth
+knowing about; not worth a lock held across a TTS call.

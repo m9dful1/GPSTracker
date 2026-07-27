@@ -36,19 +36,6 @@ class AudioServiceImpl @Inject constructor(
     private val context: Context
 ) : AudioService {
 
-    private data class Utterance(
-        val id: String,
-        val text: String,
-        val channel: SendChannel<AudioService.SpeakingStatus>?,
-        val isPrompt: Boolean
-    )
-
-    private data class PendingNarration(
-        val text: String,
-        val position: Int,
-        val channel: SendChannel<AudioService.SpeakingStatus>?
-    )
-
     companion object {
         /**
          * Text to speak when resuming narration that was interrupted at
@@ -88,11 +75,9 @@ class AudioServiceImpl @Inject constructor(
     private var textToSpeech: TextToSpeech? = null
     private var isInitialized = false
 
-    private val lock = Any()
-    private var current: Utterance? = null
-    private var pendingResume: PendingNarration? = null
-    private var lastSpeakingPosition = 0
-    private var isPaused = false
+    // Who is speaking, what was interrupted, and what happens next. Extracted
+    // so the interleavings can be tested without an engine or a device.
+    private val session = SpeechSession()
 
     private val _speechProgress = MutableStateFlow(0f)
     override val speechProgress: StateFlow<Float> = _speechProgress
@@ -109,7 +94,7 @@ class AudioServiceImpl @Inject constructor(
      * being taken by a phone call — so nothing has to infer it.
      */
     private fun publishPlaying() {
-        _isPlaying.value = synchronized(lock) { current != null && !isPaused }
+        _isPlaying.value = session.isAudible
     }
 
     // Audio Manager for handling audio focus
@@ -134,7 +119,7 @@ class AudioServiceImpl @Inject constructor(
             AudioManager.AUDIOFOCUS_GAIN -> {
                 Timber.d("Audio focus gained")
                 hasAudioFocus = true
-                if (isPaused) {
+                if (session.isPaused) {
                     resume()
                 }
             }
@@ -144,9 +129,7 @@ class AudioServiceImpl @Inject constructor(
     // Single persistent listener; dispatches to the current utterance's flow
     private val progressListener = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String) {
-            val started = synchronized(lock) {
-                current?.takeIf { it.id == utteranceId }
-            }
+            val started = session.speaking?.takeIf { it.id == utteranceId }
             if (started != null && !started.isPrompt) {
                 _speechProgress.value = 0f
             }
@@ -167,12 +150,7 @@ class AudioServiceImpl @Inject constructor(
         }
 
         override fun onRangeStart(utteranceId: String, start: Int, end: Int, frame: Int) {
-            val speaking = synchronized(lock) {
-                if (current?.id == utteranceId) {
-                    lastSpeakingPosition = start
-                    current
-                } else null
-            }
+            val speaking = session.recordPosition(utteranceId, start)
             if (speaking != null && !speaking.isPrompt) {
                 _speechProgress.value = progressFraction(start, speaking.text.length)
             }
@@ -266,13 +244,8 @@ class AudioServiceImpl @Inject constructor(
             return@callbackFlow
         }
 
-        synchronized(lock) {
-            // New narration replaces anything in flight, including a pending resume
-            current?.channel?.close()
-            pendingResume?.channel?.close()
-            pendingResume = null
-            isPaused = false
-        }
+        // New narration replaces anything in flight, including a parked one
+        session.supersede().forEach { it.close() }
         startUtterance(text, channel = this, isPrompt = false)
 
         awaitClose { onChannelClosed(this) }
@@ -285,50 +258,31 @@ class AudioServiceImpl @Inject constructor(
             return@callbackFlow
         }
 
-        synchronized(lock) {
-            val interrupted = current
-            if (interrupted != null && !interrupted.isPrompt) {
-                // Park the narration; it resumes when the prompt completes
-                pendingResume = PendingNarration(interrupted.text, lastSpeakingPosition, interrupted.channel)
-                interrupted.channel?.trySend(AudioService.SpeakingStatus.PAUSED)
-                current = null
-            } else if (interrupted != null) {
-                // A newer prompt replaces an older one; keep any pending narration
-                interrupted.channel?.close()
-                current = null
-            }
-        }
+        val interruption = session.interruptForPrompt()
+        interruption.notifyPaused?.trySend(AudioService.SpeakingStatus.PAUSED)
+        interruption.close?.close()
         startUtterance(text, channel = this, isPrompt = true)
 
         awaitClose { onChannelClosed(this) }
     }
 
     override fun pause(): Boolean {
-        synchronized(lock) {
-            val active = current ?: return false
-            if (isPaused) return false
+        val outcome = session.pause()
+        if (!outcome.paused) return false
 
-            pendingResume = PendingNarration(active.text, lastSpeakingPosition, active.channel)
-            current = null
-            isPaused = true
-            active.channel?.trySend(AudioService.SpeakingStatus.PAUSED)
-        }
+        outcome.notifyPaused?.trySend(AudioService.SpeakingStatus.PAUSED)
+        // A prompt is dropped rather than parked; see SpeechSession.pause
+        outcome.close?.close()
         textToSpeech?.stop()
         publishPlaying()
         return true
     }
 
     override fun resume(): Boolean {
-        val toResume = synchronized(lock) {
-            if (!isPaused) return false
-            pendingResume.also { pendingResume = null; isPaused = false }
-        } ?: return false
+        val toResume = session.resume() ?: return false
 
         if (!hasAudioFocus && !requestAudioFocus()) {
-            synchronized(lock) {
-                pendingResume = toResume
-                isPaused = true
-            }
+            session.repark(toResume)
             publishPlaying()
             return false
         }
@@ -338,14 +292,7 @@ class AudioServiceImpl @Inject constructor(
     }
 
     override fun stop() {
-        synchronized(lock) {
-            current?.channel?.close()
-            pendingResume?.channel?.close()
-            current = null
-            pendingResume = null
-            isPaused = false
-            lastSpeakingPosition = 0
-        }
+        session.clear().forEach { it.close() }
         _speechProgress.value = 0f
         textToSpeech?.stop()
         releaseAudioFocus()
@@ -398,19 +345,14 @@ class AudioServiceImpl @Inject constructor(
         isPrompt: Boolean
     ) {
         val utteranceId = UUID.randomUUID().toString()
-        synchronized(lock) {
-            current = Utterance(utteranceId, text, channel, isPrompt)
-            lastSpeakingPosition = 0
-        }
+        session.startedSpeaking(SpeechSession.Utterance(utteranceId, text, channel, isPrompt))
 
         val bundle = Bundle()
         bundle.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
 
         val result = textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, bundle, utteranceId)
         if (result == TextToSpeech.ERROR) {
-            synchronized(lock) {
-                if (current?.id == utteranceId) current = null
-            }
+            session.failedToStart(utteranceId)
             channel?.trySend(AudioService.SpeakingStatus.ERROR)
             channel?.close()
             releaseAudioFocus()
@@ -419,19 +361,8 @@ class AudioServiceImpl @Inject constructor(
     }
 
     private fun handleUtteranceFinished(utteranceId: String, error: Boolean) {
-        val finished: Utterance
-        var toResume: PendingNarration? = null
-
-        synchronized(lock) {
-            val active = current ?: return
-            if (active.id != utteranceId) return
-            finished = active
-            current = null
-            if (active.isPrompt && pendingResume != null && !isPaused) {
-                toResume = pendingResume
-                pendingResume = null
-            }
-        }
+        val outcome = session.finish(utteranceId)
+        val finished = outcome.finished ?: return
 
         publishPlaying()
 
@@ -443,7 +374,7 @@ class AudioServiceImpl @Inject constructor(
         finished.channel?.trySend(status)
         finished.channel?.close()
 
-        val resume = toResume
+        val resume = outcome.resume
         if (resume != null && resume.channel?.isClosedForSend != true) {
             // Resume the narration the prompt interrupted
             startUtterance(resumeTextFrom(resume.text, resume.position), resume.channel, isPrompt = false)
@@ -457,17 +388,7 @@ class AudioServiceImpl @Inject constructor(
      * utterance, and drop any pending resume bound to it.
      */
     private fun onChannelClosed(channel: SendChannel<AudioService.SpeakingStatus>) {
-        var shouldStopTts = false
-        synchronized(lock) {
-            if (current?.channel === channel) {
-                current = null
-                shouldStopTts = true
-            }
-            if (pendingResume?.channel === channel) {
-                pendingResume = null
-            }
-        }
-        if (shouldStopTts) {
+        if (session.abandon(channel)) {
             textToSpeech?.stop()
             releaseAudioFocus()
         }
