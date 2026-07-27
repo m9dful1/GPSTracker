@@ -39,6 +39,9 @@
     <string name="channel_playback_name">Audio Playback Controls</string>
     <string name="channel_playback_description">Controls for audio narration playback</string>
 
+    <!-- Map markers -->
+    <string name="destination_marker_title">Destination</string>
+
     <!-- Narration fact card -->
     <string name="narration_source_wikipedia">From Wikipedia — read the full article</string>
     <string name="narration_tap_for_details">Tap for details</string>

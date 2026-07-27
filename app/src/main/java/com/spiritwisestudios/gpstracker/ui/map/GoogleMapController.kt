@@ -245,11 +245,19 @@ class GoogleMapController(private val activity: Activity) : MapController {
 
     override fun showDestinationMarker(position: LatLng) {
         val map = map ?: return
-        if (destinationMarker != null) return
+
+        // Move the pin rather than ignoring the call. Refusing to touch an
+        // existing marker left the previous drive's destination on the map
+        // when a new one was chosen — the route was redrawn, the pin wasn't.
+        destinationMarker?.let {
+            it.position = position.toMap()
+            return
+        }
+
         destinationMarker = map.addMarker(
             MarkerOptions()
                 .position(position.toMap())
-                .title("Destination")
+                .title(activity.getString(R.string.destination_marker_title))
                 .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
         )
     }

@@ -4,6 +4,7 @@ import android.app.Activity
 import android.location.Location
 import android.os.Bundle
 import android.view.ViewGroup
+import com.spiritwisestudios.gpstracker.R
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.util.CameraLogic
 import com.spiritwisestudios.gpstracker.util.GeoUtils
@@ -259,11 +260,16 @@ class MapLibreMapController(private val activity: Activity) : MapController {
 
     override fun showDestinationMarker(position: LatLng) {
         val map = map ?: return
-        if (destinationMarker != null) return
+
+        // Replace any existing pin rather than ignoring the call. Refusing to
+        // touch it left the previous drive's destination on the map when a new
+        // one was chosen — the route was redrawn, the pin wasn't.
+        destinationMarker?.let { map.removeMarker(it) }
+
         destinationMarker = map.addMarker(
             MarkerOptions()
                 .position(position.toMap())
-                .title("Destination")
+                .title(activity.getString(R.string.destination_marker_title))
                 .icon(MarkerIcons.pin(activity, MarkerStyling.HUE_RED))
         )
     }

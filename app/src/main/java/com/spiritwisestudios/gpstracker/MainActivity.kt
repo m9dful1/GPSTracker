@@ -1160,6 +1160,10 @@ class MainActivity : AppCompatActivity(), MapController.Host,
             // A new destination is a new drive: its turns and its arrival are
             // all still unspoken, even if the last drive ended at one of them
             voicePromptGate.reset()
+            // And the previous drive's pin belongs to the previous drive. The
+            // route is redrawn per route version, but a destination that fails
+            // to route would otherwise leave the old pin standing over it.
+            map.clearDestinationMarker()
             updateNavButtons()
             tvNavigationDestination.text = getString(R.string.route_to, displayName)
             tvNavigationInfo.text = getString(R.string.calculating_route)

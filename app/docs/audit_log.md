@@ -1107,7 +1107,7 @@ convention exists; this site missed it.
 
 **Fix:** parse it like its neighbours — unknown value falls back to `MEDIUM`.
 
-### B3 · A new destination keeps the old destination marker — `TODO`
+### B3 · A new destination keeps the old destination marker — `DONE`
 
 Both map controllers refuse to move the marker once one exists
 (`MapLibreMapController.kt:262`, `GoogleMapController.kt:248` — `if
@@ -1257,3 +1257,25 @@ this bug — a convention followed everywhere except once.
 Tests: 2 new cases (386 total, 0 failures) — an unrecognized value falling back
 to `MEDIUM`, and every real level surviving a round trip through storage, so the
 fallback can't quietly swallow a valid one.
+
+### B3 — "Point the destination pin at the destination"
+
+Fixed at both ends, because either alone leaves a case standing:
+
+- **The controllers move the pin** instead of returning early when one exists.
+  Google's marker takes a new `position`; MapLibre's is replaced, matching how
+  that file already clears it. `showDestinationMarker` is now what its name
+  says — set the pin here — rather than "set it if there isn't one".
+- **A new destination clears the old pin** in `startActiveNavigation`, beside
+  the voice-gate reset. This is the case the controller fix alone misses: if the
+  new destination fails to route, nothing draws, and the previous drive's pin
+  would sit there over a route that doesn't exist.
+
+The `"Destination"` marker title was hardcoded English in both controllers,
+which is the same class of thing A20 fixed for the notification channels, so it
+went to `strings.xml` while the line was open.
+
+No new tests: this is call ordering between an activity and two map SDKs, with
+no pure decision to pin down. `lintDebug` and both variants still build, and the
+change is small enough to read in full — but it *is* the kind of fix that only a
+device confirms, and I haven't run one.
