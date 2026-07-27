@@ -1922,7 +1922,7 @@ chosen and why.
 
 ## Tier 3 — housekeeping
 
-### C4 · MapLibre's annotation API is deprecated out from under us — `TODO`
+### C4 · MapLibre's annotation API is deprecated out from under us — `WONTFIX`
 
 24 of the project's 34 compiler warnings are one thing: `Marker`,
 `MarkerOptions`, `Polyline`, `PolylineOptions`, `Polygon`, `PolygonOptions`,
@@ -1939,6 +1939,17 @@ markers to a `SymbolLayer` with a `GeoJsonSource` and the route to a
 `LineLayer`. Google's controller is unaffected; the `MapController` interface
 is the seam that makes this a one-file change.
 
+**`WONTFIX` — the fix above is the wrong fix, and the urgency was overstated.**
+Two facts found on picking it up: the annotation API was deprecated in MapLibre
+**7.0.0** and still ships in **13.4.1**, six major versions later with no
+removal announced; and MapLibre's own replacement is the **Annotation Plugin**,
+a separate artifact with `SymbolManager`/`LineManager`/`FillManager`, not the
+hand-rolled style layers written above. Doing what this task says would have
+been a from-scratch rewrite of the default map provider's rendering, verified
+by nothing but a compiler, to replace a working API with one the library
+doesn't recommend. The real work is **C6**; the warnings are suppressed with
+their reasons in the meantime.
+
 ### C5 · `MainActivity` is still the biggest file — `TODO`
 
 1460 lines, after B9 took the navigation state machine out. What is left is
@@ -1949,6 +1960,26 @@ tour lifecycle, the journal and settings sheets, and the location listener.
 with it. The camera work is the strongest candidate — `CameraLogic` is already
 pure and tested, but *when* to drive, follow, or settle back is still spread
 across four callbacks.
+
+### C6 · Port MapLibre rendering to the Annotation Plugin — `TODO`
+
+C4's replacement, with the right target. `org.maplibre.gl:android-plugin-annotation-v9`
+provides `SymbolManager`, `LineManager` and `FillManager` — a close mapping to
+what `MapLibreMapController` already does, with click handling built in.
+
+**Why it isn't done yet:** every part of it fails invisibly. Managers bind to a
+`Style`, and this app swaps styles six ways plus night mode — today's comment
+"markers survive style swaps" stops being true, and everything drawn has to be
+re-registered and re-populated on each load. Marker icons stop being `Icon`
+objects and become images registered into the style by name, one per hue and
+alpha. Marker taps stop being `setOnMarkerClickListener` and become feature
+queries with their own hit radius. A mistake in any of those is an empty map,
+and no unit test, lint run or R8 pass can see a pin.
+
+**Fix:** with a device to hand. Port one thing at a time — the route line
+first (no icons, no hit-testing), then the scout circle, then the POI markers
+and their taps — launching between each. `MapController` is the seam, so
+Google's controller and the whole activity stay untouched.
 
 ---
 
@@ -2063,3 +2094,36 @@ mean**. An invisible relationship between two files became a red build.
 Tests: 1 new case (452 total, 0 failures). The builder call itself still cannot
 be unit-tested — it needs a real database file and an instrumented test — so
 what is testable is the relationship, and that is what got tested.
+
+### C4 — "Make the compiler's warnings mean something again"
+
+**32 compiler warnings → 2**, and both survivors are real: the delicate
+coroutines API in `AudioServiceImpl` (documented in the C1 entry) and the
+always-true condition in `NavigationServiceImpl` (a smart-cast artefact, noted
+when round 3 opened).
+
+**What I did not do is the fix this task asked for, and the task is wrong.**
+Picking it up turned up two facts that change it completely:
+
+- MapLibre deprecated the annotation API in **7.0.0**. The app is on **13.4.1**
+  — six major versions later, still shipping, no removal announced. "Deprecated
+  out from under us" overstated it considerably.
+- The replacement MapLibre actually recommends is its **Annotation Plugin**, a
+  separate artifact with `SymbolManager`/`LineManager`/`FillManager`. My
+  proposed fix — hand-rolled `SymbolLayer` and `LineLayer` over `GeoJsonSource`
+  — was rebuilding by hand what the library ships.
+
+So C4 is `WONTFIX` and the real work is **C6**, written against the plugin and
+explicitly gated on a device. This is the same call as B11: the failure mode is
+an empty map on the default, keyless provider — the primary experience — and
+nothing available here can see a pin appear.
+
+**What this iteration delivers instead is the part that is verifiable and was
+worth doing on its own.** Both files carry a `@file:Suppress("DEPRECATION")`
+with the reason, the timeline, and a pointer to C6. That is not tidying: those
+24 warnings were two thirds of the build's output, and three times this session
+I had to grep them away to read the two that mattered. A warning list nobody
+can read is a warning list nobody reads.
+
+No new tests — nothing changed at runtime. 452 tests, 0 failures; debug,
+release and lint all still build.

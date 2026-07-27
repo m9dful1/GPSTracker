@@ -1,3 +1,17 @@
+// MapLibre deprecated its simple annotation API (Marker, Polyline, Polygon)
+// in 7.0.0 and still ships it in 13.4.1 — six major versions later, with no
+// removal announced. Its replacement is the MapLibre Annotation Plugin, which
+// is a separate dependency and a rewrite of everything below that draws:
+// managers instead of map.addX, images registered into the style, and click
+// handling by feature query. That is C6, and it needs a device to verify,
+// because nothing about whether a pin appears is visible to a compiler.
+//
+// Until then these 24 warnings are suppressed rather than tolerated. Left in
+// place they were two thirds of the build's output, and real warnings — a
+// delicate coroutines API, an always-true condition — had to be grepped out
+// from under them.
+@file:Suppress("DEPRECATION")
+
 package com.spiritwisestudios.gpstracker.ui.map
 
 import android.app.Activity

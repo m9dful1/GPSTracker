@@ -1,3 +1,7 @@
+// Icon and IconFactory belong to MapLibre's deprecated annotation API; see
+// the note at the top of MapLibreMapController, which is the only caller.
+@file:Suppress("DEPRECATION")
+
 package com.spiritwisestudios.gpstracker.util
 
 import android.content.Context
