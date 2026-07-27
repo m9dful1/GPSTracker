@@ -49,6 +49,7 @@ import com.google.android.material.snackbar.Snackbar
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.TourPlan
+import com.spiritwisestudios.gpstracker.ui.map.CameraDirector
 import com.spiritwisestudios.gpstracker.ui.navigation.NavigationPresenter
 import com.spiritwisestudios.gpstracker.domain.service.AudioService
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
@@ -65,7 +66,6 @@ import com.spiritwisestudios.gpstracker.ui.map.MapController
 import com.spiritwisestudios.gpstracker.ui.map.MapLibreMapController
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
 import com.spiritwisestudios.gpstracker.util.AppConstants
-import com.spiritwisestudios.gpstracker.util.CameraLogic
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -119,29 +119,23 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     private var navigationJob: Job? = null
 
     // Latest GPS speed, for the speed-adaptive navigation camera
-    private var lastKnownSpeedMps = 0f
 
     // Flag to check if this is the first location update
-    private var isFirstUpdate = true
 
     // Last known device position (the map's built-in blue dot renders it)
     private var lastKnownLatLng: LatLng? = null
 
     // Camera follows the user until they pan/zoom; recenter FAB re-engages
-    private var isFollowingUser = true
 
     // Heading-up driving view outside guidance: engages at driving speed,
     // releases after a sustained stop
-    private val drivingCameraGate = CameraLogic.DrivingCameraGate()
 
     // What the camera is currently showing (as opposed to what the gate
     // decides), so the view settles back to top-down exactly once when a
     // drive ends
-    private var cameraInDrivingView = false
 
     // Last trustworthy GPS course, held through stops so the camera
     // doesn't snap north at a red light
-    private var lastGpsBearing: Float? = null
 
     // Where we last searched for POIs; refetch after moving far enough
     private var lastPoiFetchCenter: LatLng? = null
@@ -149,6 +143,9 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     // Keeps the same instruction from being spoken on every location tick,
     // and arrival from being repeated at every fix in the parking lot
     private val nav = NavigationPresenter()
+
+    // Which camera move a fix, a gesture or a drive calls for
+    private val camera = CameraDirector()
 
     // Tour mode service connection
     private var tourModeService: TourModeService? = null
@@ -235,7 +232,6 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     private var turnInstructionFragment: TurnInstructionFragment? = null
 
     // LocationHistory for calculating bearing
-    private val locationHistory = ArrayDeque<LatLng>(5)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -266,13 +262,10 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
         // Define the listener to handle location updates
         locationListener = LocationListenerCompat { location ->
-            lastKnownSpeedMps = if (location.hasSpeed()) location.speed else 0f
-            // The GPS course is only meaningful in motion; keep the last
-            // good one through stops
-            if (location.hasBearing() && lastKnownSpeedMps >= 1f) {
-                lastGpsBearing = location.bearing
-            }
-            drivingCameraGate.onSpeed(lastKnownSpeedMps)
+            camera.onLocation(
+                speedMps = if (location.hasSpeed()) location.speed else null,
+                bearing = if (location.hasBearing()) location.bearing else null
+            )
             updateLocationOnMap(location)
             refreshNearbyPlacesIfNeeded()
         }
@@ -435,13 +428,10 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         // Recenter FAB re-engages camera following, in whichever view fits
         // what the user is doing right now
         findViewById<FloatingActionButton>(R.id.fab_recenter).setOnClickListener {
-            isFollowingUser = true
             lastKnownLatLng?.let { pos ->
-                if (nav.phase == NavigationPresenter.Phase.GUIDING || drivingCameraGate.isDriving) {
-                    animateDrivingCamera(pos)
-                } else {
-                    easeToTopDownFollow(pos)
-                }
+                applyCameraMove(
+                    camera.recenter(pos, navigating = nav.phase == NavigationPresenter.Phase.GUIDING)
+                )
             }
         }
 
@@ -822,7 +812,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     // Stop following the user when they pan/zoom manually (Google Maps
     // behavior); the recenter FAB turns following back on.
     override fun onUserGesture() {
-        isFollowingUser = false
+        camera.onUserGesture()
     }
 
     // Long-press anywhere to scout that area for interesting places —
@@ -886,7 +876,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
             // sitting empty while the first live fix is acquired. Position
             // only: the cached speed and bearing are stale and would engage
             // the driving camera from a previous drive.
-            if (isFirstUpdate) {
+            if (camera.awaitingFirstMove) {
                 locationClient.lastKnownLocation()
                     ?.takeIf { System.currentTimeMillis() - it.time <= MAX_SEED_AGE_MS }
                     ?.let { cached ->
@@ -913,20 +903,23 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
         map.forwardLocation(location)
 
-        if (isFirstUpdate) {
-            Timber.d("First location update, animating camera with zoom")
-            map.animateToFirstFix(newLatLng)
-            isFirstUpdate = false
-        } else if (isFollowingUser && nav.phase == NavigationPresenter.Phase.NONE) {
-            // Navigation drives its own camera, and a route preview holds
-            // the route overview; outside of those, follow the user unless
-            // they've panned away — heading-up while driving, plain
-            // top-down otherwise
-            when {
-                drivingCameraGate.isDriving -> animateDrivingCamera(newLatLng)
-                cameraInDrivingView -> easeToTopDownFollow(newLatLng)
-                else -> map.easeFollow(newLatLng, CameraLogic.CAMERA_EASE_MS)
+        applyCameraMove(
+            camera.moveFor(newLatLng, navigating = nav.phase != NavigationPresenter.Phase.NONE)
+        )
+    }
+
+    /** Perform what [CameraDirector] decided; it never touches the map itself. */
+    private fun applyCameraMove(move: CameraDirector.Move) {
+        when (move) {
+            is CameraDirector.Move.None -> Unit
+            is CameraDirector.Move.FirstFix -> {
+                Timber.d("First location update, animating camera with zoom")
+                map.animateToFirstFix(move.target)
             }
+            is CameraDirector.Move.Driving ->
+                map.easeDrivingCamera(move.target, move.zoom, move.bearing, move.durationMs)
+            is CameraDirector.Move.TopDown -> map.animateToTopDownFollow(move.target)
+            is CameraDirector.Move.Follow -> map.easeFollow(move.target, move.durationMs)
         }
     }
 
@@ -1047,7 +1040,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         super.onResume()
         map.onResume()
         bannerAdView?.resume()
-        if (!isFirstUpdate) {
+        if (!camera.awaitingFirstMove) {
             startLocationUpdates()
         }
     }
@@ -1208,7 +1201,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     private fun beginGuidance() {
         if (!nav.beginGuidance()) return
         renderNavButtons(nav.buttons())
-        isFollowingUser = true
+        camera.followAgain()
 
         // No ads while driving; the banner comes back when the drive ends
         binding.adBannerContainer.visibility = View.GONE
@@ -1248,7 +1241,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
                 map.showRoutePolyline(routePoints)
 
                 // Move the camera to show the whole route, flat and north-up
-                cameraInDrivingView = false
+                camera.onRouteOverview()
                 map.animateToRouteOverview(routePoints, currentLocation)
             }
         } catch (e: Exception) {
@@ -1258,59 +1251,8 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
     // Update camera position for active navigation
     private fun updateCameraForNavigation(currentLocation: LatLng) {
-        if (!nav.shouldFollowCamera(isFollowingUser)) return
-        animateDrivingCamera(currentLocation)
-    }
-
-    // Google-style driving view: heading-up, tilted toward the horizon,
-    // with the position puck in the lower third so the road ahead fills
-    // the screen; zoom widens with speed so highway driving shows further
-    private fun animateDrivingCamera(currentLocation: LatLng) {
-        cameraInDrivingView = true
-
-        // Track recent positions as the bearing fallback
-        locationHistory.add(currentLocation)
-        if (locationHistory.size > 5) {
-            locationHistory.removeFirst()
-        }
-
-        // A fix shows where the user was; by the time the ease lands they
-        // are one ease further down the road. Aim there, not at the fix,
-        // so the view doesn't permanently trail reality. The puck itself
-        // stays on the true fix.
-        val bearing = getUserBearing()
-        val lead = CameraLogic.cameraLeadMeters(lastKnownSpeedMps)
-        val target = if (lead > 0f) {
-            GeoUtils.offsetMeters(currentLocation, bearing, lead)
-        } else {
-            currentLocation
-        }
-
-        // Linear ease matched to the 1 s location cadence, so the camera
-        // glides between fixes instead of lurching
-        map.easeDrivingCamera(
-            target,
-            CameraLogic.zoomForSpeed(lastKnownSpeedMps),
-            bearing,
-            CameraLogic.CAMERA_EASE_MS
-        )
-    }
-
-    // Settle back to the flat, north-up follow view once a drive ends
-    private fun easeToTopDownFollow(target: LatLng) {
-        cameraInDrivingView = false
-        map.animateToTopDownFollow(target)
-    }
-
-    // Get user bearing (direction of travel): the GPS course when we have
-    // one, else derived from recent positions
-    private fun getUserBearing(): Float {
-        lastGpsBearing?.let { return it }
-        if (locationHistory.size >= 2) {
-            val recent = locationHistory.toList().takeLast(2)
-            return GeoUtils.bearingDegrees(recent[0], recent[1])
-        }
-        return 0f
+        if (!nav.shouldFollowCamera(camera.isFollowingUser)) return
+        applyCameraMove(camera.navigationMove(currentLocation))
     }
 
     // Update the navigation status UI
@@ -1434,8 +1376,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         activeTourName = null
         activeTourStops = emptyList()
 
-        // Clear location history
-        locationHistory.clear()
+        camera.onNavigationEnded()
 
         // The end of a drive is the one natural ad break: bring the banner
         // back and show the preloaded interstitial (a no-op if none is

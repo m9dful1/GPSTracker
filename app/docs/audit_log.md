@@ -1950,7 +1950,7 @@ by nothing but a compiler, to replace a working API with one the library
 doesn't recommend. The real work is **C6**; the warnings are suppressed with
 their reasons in the meantime.
 
-### C5 · `MainActivity` is still the biggest file — `TODO`
+### C5 · `MainActivity` is still the biggest file — `DONE`
 
 1460 lines, after B9 took the navigation state machine out. What is left is
 still several jobs: map camera work, service binding, permissions, ads, the
@@ -2127,3 +2127,45 @@ can read is a warning list nobody reads.
 
 No new tests — nothing changed at runtime. 452 tests, 0 failures; debug,
 release and lint all still build.
+
+### C5 — "Let the camera decide for itself"
+
+`CameraDirector` now answers one question — what should the camera do about
+this fix — and `MainActivity` performs the answer. Seven fields left the
+activity with it: the last speed and GPS bearing, the position history that
+stands in for a missing course, the driving gate, whether the view is tilted,
+whether the listener is still being followed, and whether the map has been
+placed at all.
+
+**The decision was never in one place.** It was spread across the location
+listener, `updateLocationOnMap`, the recenter FAB, `updateCameraForNavigation`,
+`beginGuidance`, `drawRouteFromNavigationService` and `stopNavigation` — seven
+callbacks, each holding one clause of the same rule and one field of the same
+state. That is why it had no tests: there was nothing to call.
+
+**Recording and deciding are separate, and that separation is load-bearing.**
+`onLocation(speed, bearing)` feeds the driving gate's hysteresis and keeps the
+bearing; `moveFor(location, navigating)` chooses the move. They are two methods
+because the old code did them in two places — the listener recorded on *every*
+fix, including ones arriving before the map was ready, while the decision sat
+behind `if (!map.isReady) return`. Folding them together would have quietly
+changed the gate's 20-fix release count and swallowed the first-fix move on any
+device slower to hand back a map. Faithfulness here was the whole job.
+
+The result is a sealed `Move` — `FirstFix`, `Driving`, `TopDown`, `Follow`,
+`None` — and a nine-line `applyCameraMove` in the activity that is the only
+code left touching the map camera.
+
+Tests: **15 new cases (467 total, 0 failures)**. `CameraLogicTest` already
+covered the arithmetic; these cover the choosing, which is what nobody could
+ask before: the first fix winning even mid-navigation, walking pace not
+counting as driving, a car coming to rest settling the view back **once** and
+then leaving it alone, a short stop *not* flattening the view, panning away
+handing the camera over until it is asked for back, recentering going
+heading-up while guided but flat while parked, a bearing reported at a
+standstill being discarded as noise, the fallback bearing derived from where
+the driver has been, and a route overview leaving nothing owed.
+
+`MainActivity` is **1460 → 1401 lines**. Three rounds of extraction have taken
+it from 1512, which is honest progress and not a transformation — what changed
+is that four more decisions inside it are now answerable without a car.
