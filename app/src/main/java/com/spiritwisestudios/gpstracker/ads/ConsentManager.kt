@@ -44,8 +44,7 @@ object ConsentManager {
                         if (formError != null) {
                             Timber.w("Consent form error: ${formError.message}")
                         }
-                        useNonPersonalizedAds =
-                            info.consentStatus != ConsentInformation.ConsentStatus.OBTAINED
+                        useNonPersonalizedAds = ConsentPolicy.useNonPersonalizedAds(stateOf(info))
                         onReady()
                     }
                 },
@@ -85,8 +84,7 @@ object ConsentManager {
                 ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
             ) {
                 UserMessagingPlatform.showPrivacyOptionsForm(activity) { formError ->
-                    useNonPersonalizedAds =
-                        info.consentStatus != ConsentInformation.ConsentStatus.OBTAINED
+                    useNonPersonalizedAds = ConsentPolicy.useNonPersonalizedAds(stateOf(info))
                     if (formError != null) {
                         Timber.w("Privacy options error: ${formError.message}")
                         onComplete(false)
@@ -110,8 +108,7 @@ object ConsentManager {
                 buildConsentRequestParameters(activity),
                 {
                     UserMessagingPlatform.loadAndShowConsentFormIfRequired(activity) { formError ->
-                        useNonPersonalizedAds =
-                            info.consentStatus != ConsentInformation.ConsentStatus.OBTAINED
+                        useNonPersonalizedAds = ConsentPolicy.useNonPersonalizedAds(stateOf(info))
                         if (formError != null) {
                             Timber.w("Consent form flow finished with error: ${formError.message}")
                             onComplete(false)
@@ -130,6 +127,19 @@ object ConsentManager {
             onComplete(false)
         }
     }
+
+    /**
+     * UMP's status in this app's own terms. The only place the SDK's constants
+     * are named, so the compiler checks the mapping and [ConsentPolicy] can
+     * stay free of the ad SDK — and testable.
+     */
+    private fun stateOf(info: ConsentInformation): ConsentPolicy.ConsentState =
+        when (info.consentStatus) {
+            ConsentInformation.ConsentStatus.OBTAINED -> ConsentPolicy.ConsentState.OBTAINED
+            ConsentInformation.ConsentStatus.NOT_REQUIRED -> ConsentPolicy.ConsentState.NOT_REQUIRED
+            ConsentInformation.ConsentStatus.REQUIRED -> ConsentPolicy.ConsentState.REQUIRED
+            else -> ConsentPolicy.ConsentState.UNKNOWN
+        }
 
     private fun buildConsentRequestParameters(context: Context): ConsentRequestParameters {
         val builder = ConsentRequestParameters.Builder()

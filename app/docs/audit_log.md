@@ -2192,7 +2192,7 @@ reacts to.
 
 ## Tier 2 — silent failure
 
-### D1 · Ads are non-personalized everywhere consent isn't required — `TODO`
+### D1 · Ads are non-personalized everywhere consent isn't required — `DONE`
 
 `ConsentManager` decides personalization with one expression, written three
 times:
@@ -2217,7 +2217,7 @@ And make it one pure function instead of three copies of an expression, so it
 can be tested — which is the only reason this was three copies of a bug rather
 than one.
 
-### D2 · The ads layer is three singletons with one test between them — `TODO`
+### D2 · The ads layer is three singletons with one test between them — `DONE`
 
 `AdRetryPolicy` is pure and tested. `ConsentManager`, `InterstitialAdManager`
 and `AdsInitializer` are `object`s whose every method takes an `Activity`,
@@ -2284,3 +2284,42 @@ nulls on dismissal. `PlacesViewModel`'s repeated `launchIn(viewModelScope)`
 collections all terminate, so they accumulate nothing; two overlapping nearby
 fetches can land out of order, which costs a stale POI list for one refresh and
 nothing else.
+
+### D1 and D2 — "Consent that was never needed is not consent refused"
+
+`ConsentPolicy` now holds the rule, and it is the rule that changed:
+personalized advertising is allowed when the listener agreed **or when nobody
+had to ask**. Before, only `OBTAINED` counted, so every request from outside a
+consent region — `NOT_REQUIRED`, most of the world — carried `npa=1` forever.
+
+**The mapping happens at the boundary, in UMP's own names.** `ConsentManager`
+translates `info.consentStatus` into a `ConsentState` using
+`ConsentInformation.ConsentStatus.OBTAINED` and friends, so the compiler checks
+that mapping; `ConsentPolicy` never imports the ad SDK, which is what makes it
+testable at all. My first draft copied UMP's int values into the policy by
+hand — four magic numbers whose only guarantee was that I had typed them
+correctly. That is exactly the kind of assumption this audit keeps finding, so
+it went before it was committed.
+
+**The expression existed three times** — once in `gatherConsent`, twice in
+`showPrivacyOptions` — which is why it was three copies of one bug rather than
+one. It is now one function with a name.
+
+**Verified against the bug, not just for passing.** Putting the old rule back
+(`OBTAINED -> false; else -> true`) fails two of the five tests and only those
+two. That check is worth the minute it costs: A19's tests once passed against a
+premise that was wrong.
+
+Tests: 5 new cases (472 total, 0 failures) — each state's answer, and one that
+pins the *shape*: exactly two states allow personalizing. A state added to the
+enum without a decision fails to compile in the policy; a state added to the
+wrong side of the rule fails here.
+
+**D2 is done, and its second half deliberately isn't.** D2 asked for the
+consent mapping and "whether an ad may load at all given tier, consent and an
+ad already in flight". The first is above. The second, on reading it, is
+`if (!adsAllowed() || isLoading || interstitialAd != null) return` — three
+booleans whose test would restate them. Extracting that to reach a coverage
+number is the thing this audit has refused all the way through; the ads layer's
+remaining code is SDK calls and lifecycle glue, and `AdRetryPolicy` already
+covers the one piece of arithmetic in it. Recorded rather than manufactured.
