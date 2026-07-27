@@ -64,9 +64,14 @@ interface LocationAwarenessService {
     /**
      * Unregister all points of interest from proximity monitoring.
      *
+     * Deliberately not `suspend`. Everything it clears is in memory, and the
+     * tour service releases it from `onDestroy` — which cancels the service's
+     * coroutine scope on the very next line, so anything deferred to a
+     * coroutine there would be cancelled before it ran.
+     *
      * @return True if unregistration was successful
      */
-    suspend fun unregisterAllPointsOfInterest(): Boolean
+    fun unregisterAllPointsOfInterest(): Boolean
 
     /**
      * A place already being monitored, by id.

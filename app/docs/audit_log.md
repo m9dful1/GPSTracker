@@ -1140,7 +1140,7 @@ pattern to copy is already in the tree. Each caller handles failure
 differently, which is why this wants one deliberate pass rather than the
 drive-by A10 declined to make.
 
-### B5 · A failed tour leaves its geofences registered — `TODO`
+### B5 · A failed tour leaves its geofences registered — `DONE`
 
 Banked from A4 and A7/A8. `stopTourMode` returns early unless
 `_serviceState.value.isRunning` (`TourModeService.kt:427`), and `Error` is not
@@ -1351,3 +1351,75 @@ otherwise valid body.
 and there's no MockWebServer in the test setup. The guarded parse *is* the
 decision, and it's pure; what remains untested is the one-line call site that
 uses it.
+
+### B5 — "Release the tour on every path that ends one"
+
+`stopTourMode` was two jobs in one function: *let go of what the tour holds*
+and *stop the running tour*. The `isRunning` guard belonged to the second and
+was blocking the first. Split into three:
+
+- **`releaseTourResources()`** — the cleanup, no guard, safe in any state and
+  any number of times.
+- **`endTour(finalState)`** — release, then set the state, then leave the
+  foreground and stop the service. `Error` is as terminal as `Inactive`; the
+  state is the only difference between them.
+- **`stopTourMode()`** — now one line: `endTour(Inactive)`.
+
+Every path that ends a tour goes through one of them. There are five, and the
+release used to reach only the first:
+
+| Path | Before | Now |
+| --- | --- | --- |
+| STOP command (the Stop button) | released | `endTour(Inactive)` |
+| `startTourMode` catch | `Error` + `stopSelf`, nothing released | `endTour(Error)` |
+| proximity flow `.catch` | `Error` only — didn't even `stopSelf` | `endTour(Error)` |
+| `onDestroy` | called `stopTourMode`, which returned early unless running | `releaseTourResources()` |
+| `TourCommand.NONE` → `stopSelf` | via `onDestroy` | via `onDestroy` |
+
+**What the leak actually was.** The audit called it "geofences stay
+registered", which is close but names the wrong object. There are no platform
+geofences — A16's move off Play Services made them manual, derived per fix
+inside `startProximityMonitoring`'s location listener. So the thing that
+survives a failed tour is *the listener*, and the listener is what calls
+`notifyGeofenceTransition`, which calls `startForegroundService`. That is the
+revival loop: dead tour → live listener → transition → service starts →
+`TourCommand.GEOFENCE` sees no running tour → `startTourMode()` → and if that
+start is failing for a reason that persists, round and round.
+
+**A second, worse bug in the same lines, which the audit missed.** The release
+handed the unregister call to a coroutine:
+
+```kotlin
+serviceScope.launch { locationAwarenessService.unregisterAllPointsOfInterest() }
+```
+
+and `onDestroy` ran `serviceScope.cancel()` on the line after. The scope is
+`Dispatchers.Default`, so the launch had not started yet — it was cancelled
+before it ran, **every time**, on every normal destroy, not just the failure
+paths. The monitored places therefore outlived every tour that ended by the
+service going away.
+
+The fix is that `unregisterAllPointsOfInterest` is no longer `suspend`. It
+never did anything suspending — four in-memory clears and a
+`ProximityAlertGate.reset()` — so the `suspend` was decoration, and decoration
+that forced the release into a coroutine that couldn't survive its caller. The
+interface says why in a comment now, and `releaseTourResources` carries the
+requirement that made it necessary: **nothing in it may suspend.**
+
+**Deliberately not fixed:** `unregisterPointOfInterest` (the single-place
+sibling) is still `suspend` and equally fake, but it has no callers anywhere in
+the tree — dead API, which is A16's kind of task, not this one.
+
+**No new tests, and this time the tests already existed.** The two facts this
+bug is made of are both pinned in the tree already: `a failed tour is not
+running` (`TourModeStateTest`, from A2) and `stopping a tour that has already
+ended is nothing to do` (`TourCommandTest`, from A4). Read together they
+*prove* it — the state says the tour isn't running, so the guard skipped the
+cleanup, and the Stop button couldn't reach it either because a stop request on
+a non-running tour maps to `NONE`. What was missing was never a test; it was
+the release. The fix itself is service lifecycle wiring with no pure decision
+in it, and `TourModeService` can't be instantiated in a JVM unit test — which
+is exactly B7's complaint about that file, and one more reason to do it.
+
+398 tests, 0 failures; `lintDebug` still 0 errors and 78 warnings. Verified by
+reading every caller, not by running a tour on a device.

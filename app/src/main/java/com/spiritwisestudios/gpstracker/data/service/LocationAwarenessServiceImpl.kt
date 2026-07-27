@@ -402,7 +402,7 @@ class LocationAwarenessServiceImpl @Inject constructor(
         return monitoredPointsOfInterest[pointOfInterestId]
     }
 
-    override suspend fun unregisterAllPointsOfInterest(): Boolean {
+    override fun unregisterAllPointsOfInterest(): Boolean {
         monitoredPointsOfInterest.clear()
         customRadii.clear()
         geofenceEntryTimes.clear()

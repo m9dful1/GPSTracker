@@ -317,7 +317,10 @@ class TourModeService : Service() {
 
     override fun onDestroy() {
         isAlive = false
-        stopTourMode()
+        // Release rather than stop: there is nothing left to stop — the
+        // service is already going away — and the release has to run whatever
+        // state the tour ended in, including a tour that failed.
+        releaseTourResources()
         serviceScope.cancel()
         super.onDestroy()
         Timber.d("TourModeService destroyed")
@@ -406,28 +409,44 @@ class TourModeService : Service() {
                 // Start monitoring for proximity alerts
                 locationAwarenessService.startProximityMonitoring(userPreferences.notifyDistance)
                     .catch { e ->
+                        // Proximity monitoring is how the guide notices
+                        // anything at all, so losing it ends the tour. It used
+                        // to only set the state, which left discovery, the
+                        // quiet-stretch watcher and the monitored places
+                        // running behind a tour the UI had already given up on.
                         Timber.e(e, "Error in proximity monitoring")
-                        _serviceState.value = TourModeState.Error("Error monitoring locations: ${e.message}")
+                        endTour(TourModeState.Error("Error monitoring locations: ${e.message}"))
                     }
                     .collectLatest { proximityAlert ->
                         handleProximityAlert(proximityAlert)
                     }
             } catch (e: Exception) {
                 Timber.e(e, "Error starting tour mode")
-                _serviceState.value = TourModeState.Error("Failed to start tour mode: ${e.message}")
-                stopSelf()
+                // stopSelf() alone was not enough: a bound activity keeps the
+                // service alive past it, so the failed tour's listener and
+                // monitored places outlived the tour that registered them
+                endTour(TourModeState.Error("Failed to start tour mode: ${e.message}"))
             }
         }
     }
 
     /**
-     * Stop the tour mode.
+     * Let go of everything a tour holds: its coroutines, the location
+     * listener, the places being monitored, the audio and the queue.
+     *
+     * Runs on every path that ends a tour, in any state, however many times.
+     * A guard used to sit here — "only if a tour is running" — and `Error` is
+     * not running, so a tour that died mid-start kept all of it. That matters
+     * most for the location listener, because the listener is what derives
+     * geofence transitions, and a transition starts this service: a broken
+     * tour came back from the dead on the next crossing.
+     *
+     * **Nothing in here may suspend.** [onDestroy] runs it and then cancels
+     * the service scope, so work handed to a coroutine would be cancelled
+     * before it ran — which is exactly what used to happen to the call that
+     * unregisters the monitored places.
      */
-    fun stopTourMode() {
-        if (!_serviceState.value.isRunning) {
-            return
-        }
-
+    private fun releaseTourResources() {
         // Stop the tour's own coroutine too — stopping during setup used to
         // leave it running, so a cancelled tour still registered geofences
         tourJob?.cancel()
@@ -445,15 +464,7 @@ class TourModeService : Service() {
         routeCorridorActive = false
         lastFetchCenter = null
         locationAwarenessService.stopProximityMonitoring()
-
-        // Remove registered geofences
-        serviceScope.launch {
-            try {
-                locationAwarenessService.unregisterAllPointsOfInterest()
-            } catch (e: Exception) {
-                Timber.e(e, "Error unregistering points of interest")
-            }
-        }
+        locationAwarenessService.unregisterAllPointsOfInterest()
 
         // Stop audio playback
         audioService.stop()
@@ -464,13 +475,29 @@ class TourModeService : Service() {
         // so it can't hand the flag back after a new tour has taken it.
         contentService.clearContentQueue()
         session.reset()
+    }
 
-        // Update service state
-        _serviceState.value = TourModeState.Inactive
-
-        // Stop the foreground service
+    /**
+     * End the tour and tell whoever is bound why it ended.
+     *
+     * [TourModeState.Error] is as terminal as [TourModeState.Inactive] — the
+     * tour is over either way — so both come through here and the state is
+     * the only difference. Safe to call from inside [tourJob], which the
+     * failure paths do: [releaseTourResources] cancels that job, and nothing
+     * after the cancel suspends.
+     */
+    private fun endTour(finalState: TourModeState) {
+        releaseTourResources()
+        _serviceState.value = finalState
         stopForeground(true)
         stopSelf()
+    }
+
+    /**
+     * Stop the tour mode.
+     */
+    fun stopTourMode() {
+        endTour(TourModeState.Inactive)
     }
 
     /**
