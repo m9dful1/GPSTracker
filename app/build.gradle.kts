@@ -46,7 +46,7 @@ val releaseKeystore: File? = signingProperty("RELEASE_STORE_FILE")
 
 android {
     namespace = "com.spiritwisestudios.gpstracker"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.spiritwisestudios.gpstracker"
