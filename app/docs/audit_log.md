@@ -2382,7 +2382,7 @@ and a coroutine launched on a scope that is about to be destroyed.
 
 ## Tier 1 — breaks in normal use
 
-### E1 · Saving before the settings finish loading crashes the app — `TODO`
+### E1 · Saving before the settings finish loading crashes the app — `DONE`
 
 `currentPreferences` is a `lateinit var`, assigned only inside the
 `viewModel.userPreferences.observe { }` callback, and `savePreferences()` opens
@@ -2406,7 +2406,7 @@ have Save do nothing (or stay disabled) until there is something to copy.
 
 ## Tier 2 — silent failure
 
-### E2 · Every save nudges the voice speed and pitch the user never touched — `TODO`
+### E2 · Every save nudges the voice speed and pitch the user never touched — `DONE`
 
 Voice speed is stored as a float in `0.5..2.0` and shown on a 0–20 SeekBar.
 `speedToProgress` converts with `.toInt()`, which truncates:
@@ -2432,7 +2432,7 @@ untested — which is the whole reason a rounding bug lives in them.
 **Fix:** one pure conversion for both sliders, rounding rather than truncating,
 tested for the round trip. Then Save can only change what was actually moved.
 
-### E3 · The audio settings are written twice, the second time on a dying scope — `TODO`
+### E3 · The audio settings are written twice, the second time on a dying scope — `DONE`
 
 `savePreferences()` calls `viewModel.updateUserPreferences(...)` — which writes
 every field, audio included, and updates the TTS engine — and then calls
@@ -2470,3 +2470,51 @@ disabled when no `MAPS_API_KEY` is configured, and the account-tier section is
 debug-only in both its visibility and its save path. `TakeATourViewModel`
 guards against a second `planTour` while one is in flight and catches broadly
 around the whole plan.
+
+### E1, E2 and E3 — "One save, and it saves what it was shown"
+
+Three tasks, one function. They are the same forty lines of `savePreferences`
+and the conversions it calls, and splitting them into three commits would have
+been bookkeeping rather than work.
+
+**E1 — the crash.** `currentPreferences` is a nullable `var` now, which is what
+it always was in fact: nothing exists until the DataStore read lands. Save is
+disabled until the observer fires and re-enabled when it does, so the gap
+between the sheet appearing and the preferences arriving is *visible* instead of
+being a crash on a fast tap. `savePreferences` also returns early if there is
+nothing to copy — belt to that braces, since a disabled button is a UI promise
+and this is the code's own.
+
+**E2 — the value nobody touched.** `VoiceSliders` holds the conversion for both
+sliders, and the fix is the scale, not the rounding. At 20 steps across 0.5–2.0
+the step is 0.075 and **1.0 is not a position at all** — it sat at 6.67, and
+truncating gave back 0.95. Rounding alone would have given 1.025: still not the
+value the user had. At **0.05 per step (30 positions)** every value the app
+itself uses is a position, so down-and-back is identity. The layout's two
+`android:max` values moved with it, and the XML's default `progress="10"` now
+means 1.0, which is what `UserPreferences` says — it used to mean 1.25.
+
+`progressFor` also rounds to nearest rather than truncating, which is what a
+value stored by the *old* scale needs: it moves by at most half a step instead
+of always losing a whole one.
+
+**E3 — the coroutine that might not run.** The second
+`viewModel.updateAudioSettings(...)` is gone. It re-wrote four fields
+`updateUserPreferences` had just written, and re-read preferences to update a
+speech engine that call had just updated — from the **fragment's**
+`lifecycleScope`, one line before `dismiss()`, so it may well never have run.
+Two faults that cancelled each other out. One write now, in the ViewModel's
+scope, which is where a write that must outlive a dismissed sheet belongs.
+
+Tests: **6 new cases (478 total, 0 failures)** — the app's own defaults
+surviving a round trip, *every* position surviving one, the round numbers a
+person would expect being positions at all, the ends of the scale being the ends
+of the range, a between-steps value moving to the nearer step, and out-of-range
+values clamping.
+
+**One of those tests was wrong when I wrote it, and the code was right.** I
+asserted that `0.97` and `1.0` land on the same position; they don't, because
+0.97 is nearer to 0.95 than to 1.00, and the test failed. That is the A19 lesson
+for the third time: a test written from an assumption rather than from the
+arithmetic. It now pins what the rule actually says, and says in a comment why
+0.97 is a coin toss and not the case to pin.

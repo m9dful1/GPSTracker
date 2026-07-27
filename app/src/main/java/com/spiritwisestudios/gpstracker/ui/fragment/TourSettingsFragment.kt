@@ -13,7 +13,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
-import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.spiritwisestudios.gpstracker.BuildConfig
@@ -29,8 +28,8 @@ import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
 import java.util.Locale
 import com.spiritwisestudios.gpstracker.util.DistanceFormatter
 import com.spiritwisestudios.gpstracker.util.TourLogic
+import com.spiritwisestudios.gpstracker.util.VoiceSliders
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.launch
 import java.util.EnumSet
 import javax.inject.Inject
 
@@ -103,8 +102,10 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
     private lateinit var btnCancel: Button
     private lateinit var btnSave: Button
     
-    // Current preferences
-    private lateinit var currentPreferences: UserPreferences
+    // Whatever the stored preferences turned out to be — null until the
+    // DataStore read lands, which is after this sheet is on screen and
+    // tappable. Save stays disabled until then rather than copying nothing.
+    private var currentPreferences: UserPreferences? = null
     
     companion object {
         const val TAG = "TourSettingsFragment"
@@ -208,14 +209,14 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         // Buttons
         btnCancel = view.findViewById(R.id.btn_cancel)
         btnSave = view.findViewById(R.id.btn_save)
+        btnSave.isEnabled = false // until there are preferences to save
     }
     
     private fun setupListeners() {
         // Voice Speed SeekBar
         seekBarVoiceSpeed.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                val speed = progressToSpeed(progress)
-                tvVoiceSpeedValue.text = String.format(Locale.getDefault(), "%.1fx", speed)
+                tvVoiceSpeedValue.text = formatMultiplier(VoiceSliders.valueFor(progress))
             }
             
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -226,8 +227,7 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         // Voice Pitch SeekBar
         seekBarVoicePitch.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                val pitch = progressToPitch(progress)
-                tvVoicePitchValue.text = String.format(Locale.getDefault(), "%.1fx", pitch)
+                tvVoicePitchValue.text = formatMultiplier(VoiceSliders.valueFor(progress))
             }
             
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -299,7 +299,8 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
     private fun loadPreferences() {
         viewModel.userPreferences.observe(viewLifecycleOwner) { preferences ->
             currentPreferences = preferences
-            
+            btnSave.isEnabled = true
+
             // Update UI to reflect current preferences
             updateUIFromPreferences(preferences)
         }
@@ -325,15 +326,11 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         // Audio Settings
         switchAudioEnabled.isChecked = preferences.audioEnabled
         
-        // Convert voice speed to progress (0.5 to 2.0 -> 0 to 20)
-        val speedProgress = speedToProgress(preferences.voiceSpeed)
-        seekBarVoiceSpeed.progress = speedProgress
-        tvVoiceSpeedValue.text = String.format(Locale.getDefault(), "%.1fx", preferences.voiceSpeed)
-        
-        // Convert voice pitch to progress (0.5 to 2.0 -> 0 to 20)
-        val pitchProgress = pitchToProgress(preferences.voicePitch)
-        seekBarVoicePitch.progress = pitchProgress
-        tvVoicePitchValue.text = String.format(Locale.getDefault(), "%.1fx", preferences.voicePitch)
+        seekBarVoiceSpeed.progress = VoiceSliders.progressFor(preferences.voiceSpeed)
+        tvVoiceSpeedValue.text = formatMultiplier(preferences.voiceSpeed)
+
+        seekBarVoicePitch.progress = VoiceSliders.progressFor(preferences.voicePitch)
+        tvVoicePitchValue.text = formatMultiplier(preferences.voicePitch)
         
         switchAutoPlay.isChecked = preferences.autoPlayContent
         
@@ -350,6 +347,10 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
     }
     
     private fun savePreferences() {
+        // Nothing to base a save on until the stored preferences arrive; the
+        // button is disabled until then, and this is the belt to that braces
+        val existing = currentPreferences ?: return
+
         // Build the preferred categories set
         val preferredCategories = EnumSet.noneOf(PointOfInterest.Category::class.java)
         if (cbHistorical.isChecked) preferredCategories.add(PointOfInterest.Category.HISTORICAL)
@@ -368,18 +369,15 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
             else -> UserPreferences.DetailLevel.MEDIUM
         }
         
-        // Convert progress to voice speed (0 to 20 -> 0.5 to 2.0)
-        val voiceSpeed = progressToSpeed(seekBarVoiceSpeed.progress)
-        
-        // Convert progress to voice pitch (0 to 20 -> 0.5 to 2.0)
-        val voicePitch = progressToPitch(seekBarVoicePitch.progress)
-        
+        val voiceSpeed = VoiceSliders.valueFor(seekBarVoiceSpeed.progress)
+        val voicePitch = VoiceSliders.valueFor(seekBarVoicePitch.progress)
+
         // Create updated preferences
-        val updatedPreferences = currentPreferences.copy(
+        val updatedPreferences = existing.copy(
             audioEnabled = switchAudioEnabled.isChecked,
             voiceSpeed = voiceSpeed,
             voicePitch = voicePitch,
-            voiceLanguage = currentPreferences.voiceLanguage, // Not changed in this UI
+            voiceLanguage = existing.voiceLanguage, // Not changed in this UI
             autoPlayContent = switchAutoPlay.isChecked,
             preferredCategories = preferredCategories,
             contentDetailLevel = detailLevel,
@@ -389,18 +387,12 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
             useMobileData = switchUseMobileData.isChecked
         )
         
-        // Update preferences in the ViewModel
+        // One write, in the ViewModel's scope: it stores every field and
+        // updates the speech engine. A second updateAudioSettings call used to
+        // follow this, re-writing four of the same fields — from the
+        // *fragment's* lifecycleScope, one line before dismiss(), so it might
+        // never have run at all. Its only saving grace was being redundant.
         viewModel.updateUserPreferences(updatedPreferences)
-
-        // Also update audio settings specifically
-        lifecycleScope.launch {
-            viewModel.updateAudioSettings(
-                audioEnabled = switchAudioEnabled.isChecked,
-                voiceSpeed = voiceSpeed,
-                voicePitch = voicePitch,
-                autoPlayContent = switchAutoPlay.isChecked
-            )
-        }
 
         // Both changes apply through one activity recreation ("or", not
         // "||": each save must run)
@@ -440,31 +432,7 @@ class TourSettingsFragment : BottomSheetDialogFragment() {
         return true
     }
     
-    /**
-     * Convert SeekBar progress (0-20) to voice speed (0.5-2.0)
-     */
-    private fun progressToSpeed(progress: Int): Float {
-        return 0.5f + (progress / 20.0f) * 1.5f
-    }
-    
-    /**
-     * Convert voice speed (0.5-2.0) to SeekBar progress (0-20)
-     */
-    private fun speedToProgress(speed: Float): Int {
-        return ((speed - 0.5f) / 1.5f * 20.0f).toInt()
-    }
-    
-    /**
-     * Convert SeekBar progress (0-20) to voice pitch (0.5-2.0)
-     */
-    private fun progressToPitch(progress: Int): Float {
-        return 0.5f + (progress / 20.0f) * 1.5f
-    }
-    
-    /**
-     * Convert voice pitch (0.5-2.0) to SeekBar progress (0-20)
-     */
-    private fun pitchToProgress(pitch: Float): Int {
-        return ((pitch - 0.5f) / 1.5f * 20.0f).toInt()
-    }
+    /** "1.2x", in the device's own number format. */
+    private fun formatMultiplier(value: Float): String =
+        String.format(Locale.getDefault(), "%.2fx", value)
 } 
