@@ -2518,3 +2518,122 @@ asserted that `0.97` and `1.0` land on the same position; they don't, because
 for the third time: a test written from an assumption rather than from the
 arithmetic. It now pins what the rule actually says, and says in a comment why
 0.97 is a coin toss and not the case to pin.
+
+---
+
+# Round 6
+
+A sixth pass, over what no round had opened: the journal and place-details
+sheets, `TourContentRepository`, `SwitchingApis` and `GPSTrackerApplication`.
+
+## Baseline at round 6
+
+- **478 unit tests**, 0 failures (472 at the start of round 5).
+- `lintDebug` **1 warning** (`targetSdk`), 0 errors; 2 compiler warnings, both
+  documented.
+- Open and device-gated: **B11** (`targetSdk` 36), **C6** (MapLibre plugin port).
+
+The yield is thinner than earlier rounds — most of what was read is sound, and
+that is recorded below rather than padded out. But the first finding is a crash,
+and it is one **this session's own E2 fix walked past**.
+
+---
+
+## Tier 1 — breaks in normal use
+
+### F1 · The voice-settings dialog crashes on a value the settings sheet stores — `TODO`
+
+There are two places to set voice speed and pitch: the tour settings sheet, and
+a **Voice Settings** dialog inside a place's details sheet. They disagree about
+which values exist.
+
+`dialog_voice_settings.xml` gives both sliders `android:stepSize="0.1"` from
+`valueFrom="0.5"`, so the only values that slider accepts are 0.5, 0.6, … 2.0.
+`PlaceDetailsBottomSheet` then does:
+
+```kotlin
+dialogBinding.sliderVoiceSpeed.value = currentPreferences?.voiceSpeed ?: 1.0f
+```
+
+Material validates that. From `BaseSlider` in material 1.14.0:
+
+> `Value(%s) must be equal to valueFrom(%s) plus a multiple of stepSize(%s) when using stepSize(%s)`
+
+It throws `IllegalStateException`. So a stored speed that isn't a multiple of
+0.1 crashes the app when the dialog opens — and the settings sheet stores such
+values as a matter of course:
+
+- **Before E2** (20 steps of 0.075): 15 of 21 slider positions produced an
+  invalid value, **including the stored default of 0.95**. Saving the settings
+  sheet at all and then opening Voice Settings was a crash.
+- **After E2** (30 steps of 0.05): 15 of 31 positions still do — 0.55, 0.65,
+  0.75, 0.85, 0.95, 1.05 and so on.
+
+E2 changed *which* values crash and not *whether* they do, which is worth saying
+plainly: fixing the sheet's own round trip did nothing for the second UI reading
+the same stored value, because nothing tied the two together.
+
+**Fix:** one definition of the voice range and its grid, used by both. The
+dialog should coerce whatever is stored onto that grid before handing it to a
+`Slider` — which also makes an out-of-range value from a restored or
+hand-edited preferences file harmless instead of fatal.
+
+---
+
+## Tier 3 — housekeeping
+
+### F2 · The journal's dates ignore the device's clock setting — `TODO`
+
+`TourJournalBottomSheet` formats entry dates with
+`SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())`, in two places —
+the row and the share text. The locale is right; the pattern is not. `h:mm a`
+is 12-hour with AM/PM whatever the device is set to, so a user on 24-hour time
+reads "3:45 PM" in the journal and "15:45" on the navigation card.
+
+That is exactly what A13 and A20 fixed for the ETA, with
+`DateFormat.getTimeFormat(context)`. The journal was written before that and
+never caught up. The literal `'at'` is untranslated English inside a date
+pattern too.
+
+**Fix:** `DateUtils.formatDateTime` with date, time and abbreviated month, which
+follows both the locale and the 12/24-hour setting — and drops the hardcoded
+word.
+
+### F3 · One sheet reaches for its ViewModel the long way round — `TODO`
+
+`TourJournalBottomSheet` uses `ViewModelProvider(requireActivity())[PlacesViewModel::class.java]`
+and a `lateinit var`, where every other fragment uses
+`by activityViewModels()`. It works — Hilt installs the factory the manual form
+picks up — but it is the one place that would break if the ViewModel ever needed
+assisted injection, and it is a `lateinit` where a delegate would do.
+
+**Fix:** the delegate, like its neighbours.
+
+---
+
+## Round 6 progress log
+
+Newest last.
+
+### Round 6 opened — audit recorded
+
+Read `TourJournalBottomSheet`, `PlaceDetailsBottomSheet`, `SwitchingApis`,
+`TourContentRepository`, `GPSTrackerApplication` and the voice-settings dialog
+layout. Found one crash (F1) and two pieces of housekeeping (F2, F3).
+
+**Checked and found nothing to report in:** `SwitchingApis` — routing place
+details by id shape rather than by the active provider is deliberate and
+commented, so a POI found before a provider switch still resolves.
+`GPSTrackerApplication`'s `runBlocking` seed is documented, is one small file,
+and B1 removed its ability to throw; the Google-without-a-key fallback is
+handled there too. `TourContentRepository` is a thin facade with nothing in it
+to get wrong. `JournalFormatter` already injects date rendering so it can stay
+pure — the caller is what got it wrong, not the formatter. The two voice
+slider grids (0.1 in the dialog, 0.05 in the sheet) **nest**, so a value set in
+one is representable in the other; the fault is the validation, not the
+resolution.
+
+**On the thinner yield:** five rounds have each turned up something real in
+code nobody had read. This round had less to find, and most of what it read was
+sound. The highest-value work left in the project is the two device-gated tasks,
+not more reading.
