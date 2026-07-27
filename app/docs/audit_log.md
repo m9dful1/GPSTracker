@@ -1961,7 +1961,7 @@ with it. The camera work is the strongest candidate — `CameraLogic` is already
 pure and tested, but *when* to drive, follow, or settle back is still spread
 across four callbacks.
 
-### C6 · Port MapLibre rendering to the Annotation Plugin — `TODO`
+### C6 · Port MapLibre rendering to the Annotation Plugin — `WONTFIX`
 
 C4's replacement, with the right target. `org.maplibre.gl:android-plugin-annotation-v9`
 provides `SymbolManager`, `LineManager` and `FillManager` — a close mapping to
@@ -2864,3 +2864,78 @@ Going to 37 would mean opting into a platform release whose behaviour-change
 documentation this round did not read — which is the mistake the table above
 exists to avoid. 36 is the evidence-backed step; 37 is a separate deliberate one,
 and until it happens the warning is accurate rather than stale.
+
+### C6 — "The recommended replacement is two majors behind the SDK"
+
+`WONTFIX`, on evidence gathered rather than on the caution I deferred with
+twice. B11 taught the lesson: "no gate can see it" is a reason to go and find
+facts, not a reason to keep waiting. So I went and found them.
+
+**The plugin resolves, and then the numbers stop it.** From Maven Central's
+metadata for `org.maplibre.gl:android-plugin-annotation-v9`:
+
+- The newest release is **3.0.2**, published **2024-10-17**. There is nothing
+  after it.
+- Its POM depends on **`org.maplibre.gl:android-sdk:11.3.0`**.
+- This app is on **13.4.1**.
+
+Gradle would resolve the SDK to 13.4.1, so the plugin's code — compiled against
+11.3.0 and last touched two majors ago — would run against an SDK it has never
+seen. The failure mode for that is `NoSuchMethodError` at runtime, on the map,
+invisible to the compiler and to every gate here.
+
+**So all three options were priced, and the deprecated API is the cheapest:**
+
+| Option | What it costs |
+| --- | --- |
+| **Keep the deprecated annotation API** | 24 suppressed warnings. It ships *in* 13.4.1 and is exercised by MapLibre's own release; deprecated since 7.0.0 with no removal announced in six majors. |
+| Adopt the Annotation Plugin | A plugin two majors behind, unmaintained since Oct 2024, resolved against an SDK it was not built for, failing at runtime if anything it calls has moved. |
+| Hand-roll style layers | A from-scratch rewrite of the default provider's rendering, verifiable only on a device. C4 already rejected this, and the reason has not changed. |
+
+Keeping a deprecated API that the SDK still ships and tests is a better position
+than depending on an unmaintained plugin to escape it. That is the whole finding.
+
+**What would change the answer**, so this is a decision and not a dead end:
+MapLibre announcing a removal version for the annotation API, or the Annotation
+Plugin publishing a release built against 13.x. Either one reopens this; neither
+has happened.
+
+---
+
+# The audit, closed
+
+Eight rounds, forty tasks: **thirty-eight fixed, two closed as the wrong fix**
+(C4 and C6, both about MapLibre's deprecated annotations, both with the
+reasoning recorded).
+
+| | At the start | Now |
+| --- | --- | --- |
+| Unit tests | 264 | **481** |
+| `lintDebug` | 1 error, 96 warnings | 0 errors, **1 warning** |
+| Compiler warnings | — | **2**, both documented |
+| Toolchain | AGP 8.13.2, Kotlin 2.1.0, compileSdk 35, targetSdk 35 | AGP 9.3.1, Gradle 9.6.1, Kotlin 2.3.10, compileSdk 37, **targetSdk 36** |
+| CI | none | debug + tests + lint + release with R8 |
+| Release build | unsigned, unshrunk | signed when a keystore exists, R8 and resource shrinking on |
+
+**The defects that mattered most** were not the ones that looked worst. A tour
+that silenced itself for good when a phone call arrived mid-turn-prompt (C1). A
+tour that came back from the dead because a failed one never let go of its
+location listener (B5). Ads that opted themselves out of personalization
+everywhere consent was not required (D1). A settings sheet that crashed on a
+first-open Save (E1), and a voice speed it moved every time it was saved (E2).
+A dialog that crashed on values that same sheet stored (F1). Each was reachable
+by ordinary use, and each was invisible: no crash report anyone would read, no
+log, no failing test.
+
+**The pattern behind most of them:** logic sitting inside an Android component,
+where the only way to ask it a question was to start a service and drive
+somewhere. Nine classes came out in round 1, then `NarrationDelivery`,
+`WayOfLifeWatcher`, `NavigationPresenter`, `CameraDirector`, `SpeechSession`,
+`ConsentPolicy` and `VoiceSliders`. Every one of those extractions was paid for
+by a bug it made visible.
+
+**What is left, and it needs a device rather than a build:** nothing on this
+list. `targetSdk` 37 when API 37's behaviour changes have been read (round 8
+explains why not yet), and the smoke test round 8 names — a full-screen map with
+hand-applied insets on a large screen, in an orientation this app never had to
+handle.
