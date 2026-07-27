@@ -1213,7 +1213,7 @@ is a number to bump without reading something first.
 release notes read and the gradle gate run, and `targetSdk` last and on its
 own. Not a single commit.
 
-### B9 · `MainActivity`'s navigation state machine — `TODO`
+### B9 · `MainActivity`'s navigation state machine — `DONE`
 
 Opened by B7, which named two extractions and did the first. `MainActivity` is
 **1521 lines** and the largest thing in it is the navigation UI: `NavState`,
@@ -1684,3 +1684,49 @@ of these jars.
 **What no gate here can see:** the app was not run. Material's rendering,
 MapLibre 13.4's map, the Play Services libraries and anything about how the UI
 looks are unverified by anything but the compiler.
+
+### B9 — "Give the navigation state machine somewhere to live"
+
+`NavigationPresenter` now owns the `NONE → PREVIEW → GUIDING → NONE` machine
+and every decision that hangs off it: which button shows and what the other one
+says, whether the card reads "Navigating to" or "Route to", whether a turn card
+appears, whether anything is spoken and in what words, whether the camera
+follows, and whether a new route becomes a narration corridor. The
+`VoicePromptGate` moved inside it, because "has this already been said" is part
+of "should this be said".
+
+**It is not shaped like A19's or B7's host interface, deliberately.** Those own
+a loop: they call out to the service repeatedly and asynchronously, so an
+interface to call *back* through is the only way to test them. This owns no
+loop — `MainActivity` collects the status flow and asks what each update means.
+So the presenter answers with data (`Buttons`, `RouteCard`, `Eta`, a prompt
+string or null) and the activity renders it. That needs no fakes at all, and it
+leaves the order of the view calls exactly where it was, which matters when the
+change can't be run on a device. Copying the `Host` shape here would have been
+pattern-matching, not design.
+
+**The split runs along the resources line.** The presenter decomposes; the
+activity words. `Eta.Remaining(hours, minutes, arrivalAtMillis)` is a fact about
+the drive and is tested; turning it into "1 h 30 min (4:15 PM)" needs
+`getString` and the device's own 12-or-24-hour setting, so it stays in the
+activity. Same for the destination line: the presenter says `guiding = true`,
+the activity picks the string.
+
+Tests: 18 new cases (429 total, 0 failures) — the phases and their illegal
+transitions (Start without a preview does nothing, and says so rather than
+half-starting), a preview showing no turn card and saying nothing, the two
+announced timings and the three silent ones, the same turn suppressed at the
+same distance but announced again when it gets closer, **arrival spoken once
+however many times a parked car reports it**, a new drive forgetting all of it,
+and the ETA arithmetic including the progress bar's horizon.
+
+**One thing the extraction made explicit rather than changed:** `ADVANCE`
+timing puts a card on screen but is never spoken. That was true before — the
+activity only spoke `IMMEDIATE` and `APPROACHING`, so the `ADVANCE` branch in
+the old `formatInstructionForVoice` was unreachable. `promptFor` now returns
+null for it with the reason written down, and the wording branch is kept
+because it is the same sentence `APPROACHING` uses.
+
+`MainActivity` is **1521 → 1460 lines**, and the presenter is 227. As in B7,
+the line count is not the win — the win is that the navigation state machine
+can be interrogated without a car.

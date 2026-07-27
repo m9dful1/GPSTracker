@@ -49,6 +49,7 @@ import com.google.android.material.snackbar.Snackbar
 import com.spiritwisestudios.gpstracker.data.repository.UserPreferencesRepository
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.TourPlan
+import com.spiritwisestudios.gpstracker.ui.navigation.NavigationPresenter
 import com.spiritwisestudios.gpstracker.domain.service.AudioService
 import com.spiritwisestudios.gpstracker.domain.service.NavigationService
 import com.spiritwisestudios.gpstracker.service.TourModeService
@@ -65,7 +66,6 @@ import com.spiritwisestudios.gpstracker.ui.map.MapLibreMapController
 import com.spiritwisestudios.gpstracker.ui.viewmodel.PlacesViewModel
 import com.spiritwisestudios.gpstracker.util.AppConstants
 import com.spiritwisestudios.gpstracker.util.CameraLogic
-import com.spiritwisestudios.gpstracker.util.DistanceFormatter
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -74,11 +74,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.Date
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import com.spiritwisestudios.gpstracker.util.GeoUtils
 import com.spiritwisestudios.gpstracker.util.MarkerStyling
-import com.spiritwisestudios.gpstracker.util.VoicePromptGate
 import com.spiritwisestudios.gpstracker.databinding.ActivityMainBinding
 import java.util.ArrayDeque
 
@@ -150,7 +148,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
     // Keeps the same instruction from being spoken on every location tick,
     // and arrival from being repeated at every fix in the parking lot
-    private val voicePromptGate = VoicePromptGate()
+    private val nav = NavigationPresenter()
 
     // Tour mode service connection
     private var tourModeService: TourModeService? = null
@@ -191,8 +189,6 @@ class MainActivity : AppCompatActivity(), MapController.Host,
      * route with a live ETA but stays quiet — no voice, no turn cards, no
      * camera takeover — until the user taps Start and it becomes GUIDING.
      */
-    private enum class NavState { NONE, PREVIEW, GUIDING }
-    private var navState = NavState.NONE
 
     // Name of the planned tour being driven, if any — the tour guide opens
     // a named tour with a welcome instead of the generic route preview
@@ -317,7 +313,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
                 override fun onAdLoaded() {
                     bannerAdLoaded = true
                     // Stay hidden during guidance; the drive's end unhides it
-                    if (navState != NavState.GUIDING) {
+                    if (nav.phase != NavigationPresenter.Phase.GUIDING) {
                         binding.adBannerContainer.visibility = View.VISIBLE
                     }
                 }
@@ -441,7 +437,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         findViewById<FloatingActionButton>(R.id.fab_recenter).setOnClickListener {
             isFollowingUser = true
             lastKnownLatLng?.let { pos ->
-                if (navState == NavState.GUIDING || drivingCameraGate.isDriving) {
+                if (nav.phase == NavigationPresenter.Phase.GUIDING || drivingCameraGate.isDriving) {
                     animateDrivingCamera(pos)
                 } else {
                     easeToTopDownFollow(pos)
@@ -921,7 +917,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
             Timber.d("First location update, animating camera with zoom")
             map.animateToFirstFix(newLatLng)
             isFirstUpdate = false
-        } else if (isFollowingUser && navState == NavState.NONE) {
+        } else if (isFollowingUser && nav.phase == NavigationPresenter.Phase.NONE) {
             // Navigation drives its own camera, and a route preview holds
             // the route overview; outside of those, follow the user unless
             // they've panned away — heading-up while driving, plain
@@ -1078,7 +1074,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
     // Clean up resources when the activity is destroyed
     override fun onDestroy() {
         // Stop navigation if active
-        if (navState != NavState.NONE) {
+        if (nav.phase != NavigationPresenter.Phase.NONE) {
             navigationService.stopNavigation()
         }
 
@@ -1157,15 +1153,14 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         waypoints: List<LatLng> = emptyList()
     ) {
         try {
-            navState = NavState.PREVIEW
-            // A new destination is a new drive: its turns and its arrival are
-            // all still unspoken, even if the last drive ended at one of them
-            voicePromptGate.reset()
-            // And the previous drive's pin belongs to the previous drive. The
-            // route is redrawn per route version, but a destination that fails
-            // to route would otherwise leave the old pin standing over it.
+            // A new destination is a new drive: its turns and its arrival
+            // are all still unspoken, even if the last drive ended at one of
+            // them, and the previous drive's pin belongs to the previous
+            // drive — the route is redrawn per route version, but a
+            // destination that fails to route would otherwise leave the old
+            // pin standing over it.
+            renderNavButtons(nav.preview())
             map.clearDestinationMarker()
-            updateNavButtons()
             tvNavigationDestination.text = getString(R.string.route_to, displayName)
             tvNavigationInfo.text = getString(R.string.calculating_route)
             binding.progressEta.progress = 0
@@ -1185,7 +1180,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
                     val route = navigationService.getCurrentRoute()
                     if (route.isNotEmpty()) {
                         map.clearRoutePolyline()
-                        if (navState == NavState.GUIDING) {
+                        if (nav.shouldRegisterCorridor()) {
                             tourModeService?.updateRouteCorridor(route, activeTourName, activeTourStops)
                         }
                         corridorRouteVersion = status.routeVersion
@@ -1211,9 +1206,8 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
     /** PREVIEW → GUIDING: turn on voice prompts, turn cards, and the chase camera. */
     private fun beginGuidance() {
-        if (navState != NavState.PREVIEW) return
-        navState = NavState.GUIDING
-        updateNavButtons()
+        if (!nav.beginGuidance()) return
+        renderNavButtons(nav.buttons())
         isFollowingUser = true
 
         // No ads while driving; the banner comes back when the drive ends
@@ -1228,19 +1222,12 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         }
     }
 
-    /** Keep the two nav-card buttons in sync with the state machine. */
-    private fun updateNavButtons() {
-        when (navState) {
-            NavState.PREVIEW -> {
-                binding.btnNavStart.visibility = View.VISIBLE
-                binding.btnNavStop.text = getString(R.string.cancel_button)
-            }
-            NavState.GUIDING -> {
-                binding.btnNavStart.visibility = View.GONE
-                binding.btnNavStop.text = getString(R.string.end_navigation)
-            }
-            NavState.NONE -> Unit
-        }
+    /** Put the presenter's answer about the two nav-card buttons on screen. */
+    private fun renderNavButtons(buttons: NavigationPresenter.Buttons) {
+        binding.btnNavStart.visibility = if (buttons.startVisible) View.VISIBLE else View.GONE
+        binding.btnNavStop.text = getString(
+            if (buttons.stopEndsGuidance) R.string.end_navigation else R.string.cancel_button
+        )
     }
 
     // New method to draw route from the navigation service
@@ -1271,8 +1258,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
     // Update camera position for active navigation
     private fun updateCameraForNavigation(currentLocation: LatLng) {
-        // Only the guidance phase drives the camera, and not if the user panned away
-        if (navState != NavState.GUIDING || !isFollowingUser) return
+        if (!nav.shouldFollowCamera(isFollowingUser)) return
         animateDrivingCamera(currentLocation)
     }
 
@@ -1329,111 +1315,66 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
     // Update the navigation status UI
     private fun updateNavigationStatus(status: NavigationService.NavigationStatus, destinationName: String) {
-        // Format distance
-        val distanceText = DistanceFormatter.format(status.distanceRemaining)
-
-        // Format ETA
-        val etaText = if (status.timeRemaining > 0) {
-            val minutes = TimeUnit.MILLISECONDS.toMinutes(status.timeRemaining)
-            val arrivalTime = Date(System.currentTimeMillis() + status.timeRemaining)
-            // The device's own clock format, 12- or 24-hour as the user set it
-            val timeFormat = DateFormat.getTimeFormat(this)
-
-            if (minutes < 60) {
-                getString(R.string.eta_format, "$minutes min (${timeFormat.format(arrivalTime)})")
-            } else {
-                val hours = minutes / 60
-                val remainingMinutes = minutes % 60
-                getString(R.string.eta_format, "$hours h $remainingMinutes min (${timeFormat.format(arrivalTime)})")
-            }
-        } else {
-            getString(R.string.eta_calculating)
-        }
-
-        // Update UI; a preview is a plan, not a drive
-        tvNavigationDestination.text = if (navState == NavState.GUIDING) {
-            getString(R.string.navigating_to, destinationName)
-        } else {
-            getString(R.string.route_to, destinationName)
-        }
-        tvNavigationInfo.text = getString(
-            R.string.navigation_eta_and_distance,
-            etaText,
-            getString(R.string.distance_remaining, distanceText)
-        )
-        // Update ETA progress bar roughly based on time remaining
-        val remaining = status.timeRemaining
-        binding.progressEta.progress = when {
-            remaining <= 0 -> 1000
-            else -> (1000.0 * (1.0 - (remaining.coerceAtMost(60 * 60 * 1000L).toDouble() / (60 * 60 * 1000L)))).toInt()
-        }.coerceIn(0, 1000)
+        renderRouteCard(nav.card(status, destinationName, System.currentTimeMillis()))
 
         // Turn instructions (and their voice prompts) belong to guidance;
         // a preview stays quiet
-        if (navState == NavState.GUIDING) {
-            status.nextInstruction?.let { instruction ->
-                showNextInstruction(instruction, status.announcementTiming)
+        nav.instructionToShow(status)?.let { instruction ->
+            showNextInstruction(instruction, status.announcementTiming)
+        }
+    }
+
+    /** Word the presenter's route card — this is where the resources live. */
+    private fun renderRouteCard(card: NavigationPresenter.RouteCard) {
+        tvNavigationDestination.text = getString(
+            if (card.guiding) R.string.navigating_to else R.string.route_to,
+            card.destinationName
+        )
+        tvNavigationInfo.text = getString(
+            R.string.navigation_eta_and_distance,
+            etaText(card.eta),
+            getString(R.string.distance_remaining, card.distanceText)
+        )
+        binding.progressEta.progress = card.etaProgress
+    }
+
+    private fun etaText(eta: NavigationPresenter.Eta): String = when (eta) {
+        is NavigationPresenter.Eta.Calculating -> getString(R.string.eta_calculating)
+        is NavigationPresenter.Eta.Remaining -> {
+            // The device's own clock format, 12- or 24-hour as the user set it
+            val arrival = DateFormat.getTimeFormat(this).format(Date(eta.arrivalAtMillis))
+            val left = if (eta.hours > 0) {
+                "${eta.hours} h ${eta.minutes} min"
+            } else {
+                "${eta.minutes} min"
             }
+            getString(R.string.eta_format, "$left ($arrival)")
         }
     }
 
     // Display the next navigation instruction
     private fun showNextInstruction(instruction: NavigationService.NavigationInstruction,
                                     announcementTiming: NavigationService.AnnouncementTiming) {
-        // Get the maneuver details
         val maneuverDetails = navigationService.getManeuverDetails(instruction)
-
-        // Show instruction in the UI
         showTurnInstructionFragment(instruction, maneuverDetails, announcementTiming)
 
-        // Speak the instruction based on announcement timing, but only once per
-        // maneuver+timing — status updates arrive every few seconds
-        if (announcementTiming == NavigationService.AnnouncementTiming.IMMEDIATE ||
-            announcementTiming == NavigationService.AnnouncementTiming.APPROACHING) {
-            val isArrival = instruction.type == NavigationService.InstructionType.ARRIVE
-            val announcementKey = "${instruction.maneuverPoint}|${instruction.type}|$announcementTiming"
-            if (voicePromptGate.shouldSpeak(announcementKey, isArrival)) {
-                var voiceInstruction = formatInstructionForVoice(instruction, announcementTiming)
+        // Null means stay quiet: not guiding, a timing that isn't announced,
+        // or a prompt already given for this maneuver
+        val prompt = nav.promptFor(instruction, announcementTiming, maneuverDetails) ?: return
 
-                // On arrival, close the tour with a summary of the drive
-                // ("you heard about 7 places along the way"). Appended to the
-                // same utterance so it can't race the arrival prompt.
-                if (isArrival) {
-                    tourModeService?.consumeTripSummaryPhrase()?.let { summary ->
-                        voiceInstruction += " $summary"
-                    }
-                }
-
-                // Priority prompt: pauses tour narration and resumes it after
-                placesViewModel.speakNavigationPrompt(voiceInstruction)
-            }
+        // On arrival, close the tour with a summary of the drive ("you heard
+        // about 7 places along the way"). Appended to the same utterance so
+        // it can't race the arrival prompt.
+        val summary = if (nav.isArrival(instruction)) {
+            tourModeService?.consumeTripSummaryPhrase()
+        } else {
+            null
         }
-    }
 
-    // Format an instruction for voice announcement
-    private fun formatInstructionForVoice(
-        instruction: NavigationService.NavigationInstruction,
-        timing: NavigationService.AnnouncementTiming
-    ): String {
-        // Get primary and secondary instructions
-        val details = navigationService.getManeuverDetails(instruction)
-
-        // Format distance for voice
-        val distanceText = DistanceFormatter.spoken(instruction.distance)
-
-        // Format based on timing
-        return when (timing) {
-            NavigationService.AnnouncementTiming.IMMEDIATE ->
-                "${details.primaryInstruction} now"
-
-            NavigationService.AnnouncementTiming.APPROACHING ->
-                "In $distanceText, ${details.primaryInstruction.lowercase()}"
-
-            NavigationService.AnnouncementTiming.ADVANCE ->
-                "In $distanceText, ${details.primaryInstruction.lowercase()}"
-
-            else -> details.primaryInstruction
-        }
+        // Priority prompt: pauses tour narration and resumes it after
+        placesViewModel.speakNavigationPrompt(
+            if (summary != null) "$prompt $summary" else prompt
+        )
     }
 
     // Show the turn instruction fragment
@@ -1470,14 +1411,13 @@ class MainActivity : AppCompatActivity(), MapController.Host,
 
     // Stop navigation
     private fun stopNavigation() {
-        val wasGuiding = navState == NavState.GUIDING
-
         // Stop the in-flight work first, whether that's a geocode, a route
         // calculation, or the live status collection
         navigationJob?.cancel()
         navigationJob = null
 
-        navState = NavState.NONE
+        // Also forgets what the drive said, so the next one says it again
+        val wasGuiding = nav.end()
         hideNavigationStatus()
         hideTurnInstructions()
         searchBarCard.visibility = View.VISIBLE
@@ -1494,9 +1434,8 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         activeTourName = null
         activeTourStops = emptyList()
 
-        // Clear location history and announcement state
+        // Clear location history
         locationHistory.clear()
-        voicePromptGate.reset()
 
         // The end of a drive is the one natural ad break: bring the banner
         // back and show the preloaded interstitial (a no-op if none is
