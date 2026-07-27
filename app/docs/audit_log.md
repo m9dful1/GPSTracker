@@ -2358,3 +2358,115 @@ No new tests. Both changes are Android-boundary bookkeeping — a `registerRecei
 call's state and a build-config string — with no decision to pin down; the one
 piece of this area that *was* a decision is D1's, and it has five. 472 tests, 0
 failures.
+
+---
+
+# Round 5
+
+A fifth pass. The reading went to the settings sheet — at 469 lines the largest
+file no round had opened — and the Take a Tour planner behind it.
+
+## Baseline at round 5
+
+- **472 unit tests**, 0 failures (467 at the start of round 4).
+- `lintDebug` **1 warning** (`targetSdk`), 0 errors; 2 compiler warnings, both
+  documented.
+- Open and device-gated from earlier rounds: **B11** (`targetSdk` 36) and **C6**
+  (the MapLibre Annotation Plugin port).
+
+Everything found this round is in `TourSettingsFragment`, and none of it is
+exotic: a crash on a fast tap, a value the app changes behind the user's back,
+and a coroutine launched on a scope that is about to be destroyed.
+
+---
+
+## Tier 1 — breaks in normal use
+
+### E1 · Saving before the settings finish loading crashes the app — `TODO`
+
+`currentPreferences` is a `lateinit var`, assigned only inside the
+`viewModel.userPreferences.observe { }` callback, and `savePreferences()` opens
+with `currentPreferences.copy(...)`.
+
+That LiveData comes from `userPreferencesFlow.asLiveData()` — a DataStore read,
+so it arrives after a coroutine hop and a file read. The sheet's buttons are
+laid out and tappable before then. Tap **Save** on a cold first open and the
+result is `UninitializedPropertyAccessException`: not a caught failure, not a
+degraded save, a crash.
+
+It hides because the ViewModel is activity-scoped: the second time the sheet
+opens, LiveData replays its value into the observer immediately and the field is
+always set. Only the first open in a process is exposed, which is exactly the
+open a new user makes.
+
+**Fix:** the field is genuinely optional until the read lands. Make it so, and
+have Save do nothing (or stay disabled) until there is something to copy.
+
+---
+
+## Tier 2 — silent failure
+
+### E2 · Every save nudges the voice speed and pitch the user never touched — `TODO`
+
+Voice speed is stored as a float in `0.5..2.0` and shown on a 0–20 SeekBar.
+`speedToProgress` converts with `.toInt()`, which truncates:
+
+| stored | progress | saved back as |
+| --- | --- | --- |
+| 0.5 | 0 | 0.5 |
+| **1.0** (the default) | 6 | **0.95** |
+| 1.2 | 9 | 1.175 |
+| 1.5 | 13 | 1.475 |
+| 2.0 | 20 | 2.0 |
+
+So opening settings, changing the notification distance and pressing Save moves
+the voice speed the user never went near. Pitch has the same four functions and
+the same bug. It settles after one save rather than drifting forever, which is
+why it has gone unnoticed — the guide simply speaks a little slower and lower
+than it was asked to, from the first save onward.
+
+The four conversions (`progressToSpeed`, `speedToProgress`, `progressToPitch`,
+`pitchToProgress`) are two behaviours written twice, private to a fragment, and
+untested — which is the whole reason a rounding bug lives in them.
+
+**Fix:** one pure conversion for both sliders, rounding rather than truncating,
+tested for the round trip. Then Save can only change what was actually moved.
+
+### E3 · The audio settings are written twice, the second time on a dying scope — `TODO`
+
+`savePreferences()` calls `viewModel.updateUserPreferences(...)` — which writes
+every field, audio included, and updates the TTS engine — and then calls
+`viewModel.updateAudioSettings(...)` inside `lifecycleScope.launch { }`, writing
+four of those fields again and re-reading preferences to update the engine
+again.
+
+Two things are wrong and they cancel out, which is the interesting part. The
+second write is redundant. And it is launched on the **fragment's**
+`lifecycleScope` one line before `dismiss()`, so it may be cancelled before it
+ever reaches the ViewModel. A coroutine that might not run, doing work that was
+already done: the only reason this isn't a bug is that its own redundancy covers
+its own cancellation.
+
+**Fix:** delete the second call. One save, one write, and the engine update the
+ViewModel already performs.
+
+---
+
+## Round 5 progress log
+
+Newest last.
+
+### Round 5 opened — audit recorded
+
+Read `TourSettingsFragment` in full and `TakeATourViewModel`. Found one crash
+(E1), one silent value change (E2) and one redundant write on a scope about to
+be destroyed (E3).
+
+**Checked and found nothing to report in:** `saveMapProvider` / `saveAccountTier`
+— the `or` rather than `||` is deliberate and commented, both saves must run,
+and both persist through the activity-scoped ViewModel so the write survives the
+`recreate()` that follows. The Google-provider radio button is correctly
+disabled when no `MAPS_API_KEY` is configured, and the account-tier section is
+debug-only in both its visibility and its save path. `TakeATourViewModel`
+guards against a second `planTour` while one is in flight and catches broadly
+around the whole plan.
