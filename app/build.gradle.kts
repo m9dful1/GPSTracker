@@ -191,4 +191,7 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     // Real org.json for local unit tests (the android.jar stub throws)
     testImplementation(libs.json)
+    // OkHttp's own test server, so the API services can be driven over a real
+    // socket rather than only having their parsers called
+    testImplementation(libs.mockwebserver)
 }
