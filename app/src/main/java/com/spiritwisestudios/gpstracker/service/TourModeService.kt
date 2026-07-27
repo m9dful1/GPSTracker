@@ -184,15 +184,62 @@ class TourModeService : Service() {
         NarrationDelivery(session, contentService, audioService, deliveryHost)
     }
 
-    // Way-of-life filler state: when the guide last said anything, when the
-    // last filler played, how many region lookups in a row found nothing (the
-    // watcher backs off rather than re-asking every 30 seconds), and the
-    // watcher job itself
+    /**
+     * What the quiet-stretch filler needs from the service: the settings, when
+     * the guide last spoke, where the listener is, and the fact card.
+     */
+    private val wayOfLifeHost = object : WayOfLifeWatcher.Host {
+
+        override val preferences: UserPreferences get() = userPreferences
+
+        override val lastSpokenAtMillis: Long get() = lastSpokenAt
+
+        override suspend fun currentLocation(): LatLng? =
+            locationAwarenessService.getCurrentLocation()
+
+        override fun currentSpeed(): Float? = locationAwarenessService.getCurrentSpeed()
+
+        override suspend fun regionsNear(
+            location: LatLng,
+            radiusMeters: Int
+        ): List<NearbyCityApiService.City> =
+            nearbyCityApiService.nearbyCities(location, radiusMeters)
+
+        override fun onNarrating(regionName: String, content: TourContent) {
+            _currentNarration.value = Narration(
+                poiId = null, // regional color, not a place with details to open
+                poiName = regionName,
+                category = null,
+                factText = content.content,
+                upNextTitle = null,
+                sourceUrl = content.metadata["sourceUrl"]
+            )
+        }
+
+        override fun onNarrated() {
+            // Only if the card is still the segment's: a real narration may
+            // have taken the floor while it played
+            if (_currentNarration.value?.poiId == null) {
+                _currentNarration.value = null
+            }
+        }
+
+        override fun onSpoke() {
+            lastSpokenAt = System.currentTimeMillis()
+        }
+
+        override suspend fun deliverQueuedContent() = this@TourModeService.deliverQueuedContent()
+    }
+
+    private val wayOfLife: WayOfLifeWatcher by lazy {
+        WayOfLifeWatcher(session, contentService, audioService, wayOfLifeHost)
+    }
+
+    // The watcher's job, and when the guide last said anything — shared by
+    // every narration path, which is why it lives here and not in the watcher
     private var wayOfLifeJob: Job? = null
     @Volatile
     private var lastSpokenAt = 0L
-    private var lastWayOfLifeAt: Long? = null
-    private var wayOfLifeEmptyLookups = 0
 
     companion object {
         // Search this far around the user (or route samples) for POIs
@@ -202,10 +249,6 @@ class TourModeService : Service() {
         private const val REFRESH_DISTANCE_METERS = 750f
         private const val REFRESH_CHECK_INTERVAL_MS = 30_000L
 
-        // How often the quiet-stretch watcher checks, and how far around
-        // the listener to look for the region a filler segment describes
-        private const val WAY_OF_LIFE_CHECK_INTERVAL_MS = 30_000L
-        private const val WAY_OF_LIFE_CITY_RADIUS_METERS = 30_000
 
         /**
          * Whether a service instance exists right now.
@@ -459,8 +502,7 @@ class TourModeService : Service() {
         preferencesJob = null
         wayOfLifeJob?.cancel()
         wayOfLifeJob = null
-        lastWayOfLifeAt = null
-        wayOfLifeEmptyLookups = 0
+        wayOfLife.reset()
         routeCorridorActive = false
         lastFetchCenter = null
         locationAwarenessService.stopProximityMonitoring()
@@ -877,140 +919,12 @@ class TourModeService : Service() {
      * Watch for long quiet stretches and fill them with regional color —
      * the coach guide's "way of life" commentary about how people live in
      * the area, told between sights when there is no sight to tell.
+     *
+     * The deciding is [WayOfLifeWatcher]'s; this owns the job it runs in.
      */
     private fun startWayOfLifeWatcher() {
         wayOfLifeJob?.cancel()
-        wayOfLifeJob = serviceScope.launch {
-            while (isActive) {
-                delay(WAY_OF_LIFE_CHECK_INTERVAL_MS)
-                try {
-                    maybePlayWayOfLife()
-                } catch (e: Exception) {
-                    Timber.e(e, "Error in way-of-life filler")
-                }
-            }
-        }
-    }
-
-    /**
-     * Play one way-of-life segment if the stretch is quiet enough to earn
-     * it. Sights always outrank filler: anything speaking, delivering, or
-     * queued postpones this, and each region is told at most once per tour
-     * session.
-     */
-    private suspend fun maybePlayWayOfLife() {
-        if (!userPreferences.audioEnabled || !userPreferences.autoPlayContent) return
-
-        val narrationBusy = audioService.isSpeaking() || session.isDelivering ||
-            contentService.peekNextContent() != null
-        val speed = locationAwarenessService.getCurrentSpeed() ?: 0f
-        val now = System.currentTimeMillis()
-        if (!TourLogic.shouldPlayWayOfLife(
-                now,
-                lastSpokenAt,
-                lastWayOfLifeAt,
-                speed,
-                narrationBusy,
-                TourLogic.wayOfLifeCooldownMs(wayOfLifeEmptyLookups)
-            )
-        ) {
-            return
-        }
-
-        // Filler is still automatic narration: it counts against the hourly
-        // cap, and a cap of zero mutes it like everything else automatic.
-        // Advisory here, claimed for real once there is something to say.
-        if (!session.canNarrate(now, userPreferences.maxNotificationsPerHour)) {
-            return
-        }
-
-        val location = locationAwarenessService.getCurrentLocation() ?: return
-        val region = nearbyCityApiService
-            .nearbyCities(location, WAY_OF_LIFE_CITY_RADIUS_METERS)
-            .firstOrNull()
-        if (region == null) {
-            // Nothing to talk about here — empty country, or a public API
-            // turning us away. Either way, stamp the cooldown and back off:
-            // without this, the emptiest roads (exactly what this feature is
-            // for) got an Overpass POST every 30 seconds for the whole drive.
-            wayOfLifeEmptyLookups++
-            lastWayOfLifeAt = now
-            Timber.d(
-                "No region to describe; backing off to " +
-                    "${TourLogic.wayOfLifeCooldownMs(wayOfLifeEmptyLookups) / 60_000}m"
-            )
-            return
-        }
-        // Found somewhere: the road isn't empty after all
-        wayOfLifeEmptyLookups = 0
-
-        if (!session.markRegionNarrated(region.name)) {
-            // Nearest region already covered this session; wait out a full
-            // cooldown instead of re-running the lookup every pass
-            lastWayOfLifeAt = now
-            return
-        }
-
-        // Speed-capped detail, like place narration
-        val effectivePreferences = userPreferences.copy(
-            contentDetailLevel = TourLogic.detailLevelFor(speed, userPreferences.contentDetailLevel)
-        )
-        val content = contentService.getWayOfLifeContent(
-            region.name, region.latLng, effectivePreferences
-        )
-        if (content == null) {
-            // Undocumented region: the session remembers it, so it isn't
-            // retried until the next tour
-            lastWayOfLifeAt = now
-            return
-        }
-
-        // A sight may have arrived while we were fetching; it wins
-        if (audioService.isSpeaking() || session.isDelivering ||
-            contentService.peekNextContent() != null
-        ) {
-            return
-        }
-
-        // Claim the cap slot now, at the point of actually speaking
-        if (!session.tryReserveNarration(now, userPreferences.maxNotificationsPerHour)) {
-            return
-        }
-        lastWayOfLifeAt = now
-        _currentNarration.value = Narration(
-            poiId = null, // regional color, not a place with details to open
-            poiName = region.name,
-            category = null,
-            factText = content.content,
-            upNextTitle = null,
-            sourceUrl = content.metadata["sourceUrl"]
-        )
-
-        audioService.speak("${TourLogic.wayOfLifeIntro(region.name)} ${content.content}")
-            .collectLatest { status ->
-                when (status) {
-                    AudioService.SpeakingStatus.COMPLETED,
-                    AudioService.SpeakingStatus.ERROR -> {
-                        lastSpokenAt = System.currentTimeMillis()
-                    }
-                    else -> {
-                        // No action needed for other statuses
-                    }
-                }
-            }
-
-        // Hand the floor back: clear the fact card unless a real narration
-        // already took it over, and if a sight queued up while the filler
-        // spoke, deliver it after the usual breather
-        if (_currentNarration.value?.poiId == null) {
-            _currentNarration.value = null
-        }
-        if (!session.isDelivering && contentService.peekNextContent() != null) {
-            delay(TourLogic.INTER_NARRATION_PAUSE_MS)
-            if (!session.isDelivering) {
-                deliverQueuedContent()
-            }
-        }
+        wayOfLifeJob = serviceScope.launch { wayOfLife.watch() }
     }
 
     /**

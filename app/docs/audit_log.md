@@ -1171,7 +1171,7 @@ notes read, not numbers bumped), then small groups: 3 `UseKtx`, 3
 **Fix:** the catalog move and the small groups are mechanical and worth doing;
 the dependency upgrades should be a separate deliberate pass.
 
-### B7 · The two biggest files kept growing — `TODO`
+### B7 · The two biggest files kept growing — `DONE`
 
 `MainActivity` (1512 lines) now holds map camera work, the navigation UI state
 machine, service binding, ads, permissions, voice reporting and the tour
@@ -1212,6 +1212,22 @@ is a number to bump without reading something first.
 **Fix:** one dependency at a time or in small related groups, each with the
 release notes read and the gradle gate run, and `targetSdk` last and on its
 own. Not a single commit.
+
+### B9 · `MainActivity`'s navigation state machine — `TODO`
+
+Opened by B7, which named two extractions and did the first. `MainActivity` is
+**1521 lines** and the largest thing in it is the navigation UI: `NavState`,
+the prompt gating, the camera decisions, the status/instruction handling, and
+the ETA and distance formatting, spread across the activity's callbacks.
+
+The pieces of policy are already pure and tested (`VoicePromptGate`,
+`RouteProgress`, `CameraLogic`, `DistanceFormatter`). What isn't testable is
+the orchestration between them — which state a status update moves the UI to,
+and what that means for the camera, the card and the voice.
+
+**Fix:** the same seam as A19 and B7 — a `NavigationPresenter` holding
+`NavState` and the transitions, with a `Host` for the views and the map. The
+activity keeps the view wiring and nothing else about navigation.
 
 ---
 
@@ -1516,3 +1532,60 @@ see a compound drawable render or a ripple draw in a foreground, and I haven't
 run a device. The riskiest of them is the search bar — it went from three views
 to one, and `app:drawableStartCompat` relies on the activity inflating that
 `TextView` as an `AppCompatTextView`, which an `AppCompatActivity` does.
+
+### B7 — "Lift the quiet-stretch filler out of the service"
+
+`WayOfLifeWatcher` now holds the filler: the `watch()` timer, the whole
+`maybeSpeak` decision, and the two fields that were only ever the filler's —
+when the last segment played, and how many region lookups in a row came back
+empty. `TourModeService` keeps a `Host` adapter and the job it runs in.
+
+The seam is A19's, deliberately: constructor dependencies for the interfaces
+(`TourSession`, `ContentService`, `AudioService`), a `Host` for everything that
+is really the service (settings, the fact card, where the listener is, when the
+guide last spoke). Two departures from that template, both forced by what is on
+the other side:
+
+- **`lastSpokenAt` stays in the service.** Every narration path writes it — the
+  tour's greeting, a corridor announcement, a delivered story — so the filler
+  reads it through the Host (`lastSpokenAtMillis`) and reports back through
+  `onSpoke()`. Moving it would have given one of five writers custody of it.
+- **The region lookup is on the `Host`, not the constructor.**
+  `NearbyCityApiService` is a concrete final class over OkHttp; a watcher that
+  takes one cannot be given a stand-in for it. So the Host answers
+  `regionsNear(location, radiusMeters)` and the watcher keeps the radius and
+  the "nearest one" choice, which are the parts that are policy.
+
+**`maybeSpeak(nowMillis)` takes the clock as an argument** rather than reading
+it. That single signature change is what makes a four-minute silence, a
+ten-minute cooldown and an hour-long backoff describable in a test instead of
+waitable in a car.
+
+Tests: 13 new cases (411 total, 0 failures) plus the two fakes moved to a
+shared `TourServiceFakes.kt` — `NarrationDeliveryTest` had its own copies, and
+A20 already showed what that costs: adding `isPlaying` to `AudioService` broke
+one fake and would have broken both. The new cases cover what nothing could
+reach before: a quiet stretch earning a segment, a queued sight outranking one,
+**a sight arriving during the region lookup** (the second busy check, which
+exists precisely because a geofence can fire while the network call is in
+flight), the empty-country backoff doubling instead of re-POSTing every 30
+seconds, a region already covered this tour, an undocumented region, highway
+speed shortening the segment, a cap of zero muting it, a parked car, no fix,
+and `reset()` letting the next tour start over.
+
+**One wart the extraction made visible, and I left it alone.** The region is
+claimed with `markRegionNarrated` *before* the content fetch and the second
+busy check — so a sight interrupting a lookup costs that region for the rest of
+the tour, silently. The test asserts the current behaviour and says in a
+comment that it is pinned rather than endorsed: `markRegionNarrated` doubles as
+the "don't retry this region" guard, and splitting the two is a behaviour
+change, not a refactor. It is now a change someone can make with a test to
+catch them.
+
+**The line count barely moved: 1287 → 1228.** 137 lines of filler left, 45
+lines of `Host` adapter arrived. That is the honest arithmetic of this kind of
+extraction, and it is not the point — the point is that the filler's decisions
+are now reachable without a foreground service, and 13 of them are pinned. The
+same will be true of B9, which is the second extraction B7 named and which
+still has `MainActivity` at 1521 lines.
+

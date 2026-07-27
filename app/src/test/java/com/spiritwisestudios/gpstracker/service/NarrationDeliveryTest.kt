@@ -1,6 +1,5 @@
 package com.spiritwisestudios.gpstracker.service
 
-import com.spiritwisestudios.gpstracker.data.service.ContentDeliveryQueue
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.model.PointOfInterest
 import com.spiritwisestudios.gpstracker.domain.model.TourContent
@@ -11,8 +10,6 @@ import com.spiritwisestudios.gpstracker.util.TourLogic
 import com.spiritwisestudios.gpstracker.util.TourSession
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -29,92 +26,8 @@ class NarrationDeliveryTest {
 
     // --- fakes ---
 
-    /** A queue-backed content service; the generation half is never reached. */
-    private class FakeContentService : ContentService {
-        val queue = ContentDeliveryQueue()
-        val delivered = mutableListOf<String>()
-
-        override suspend fun getNextContent(): TourContent? = queue.poll()
-        override fun peekNextContent(): TourContent? = queue.peek()
-        override fun queueContentForDelivery(content: TourContent, priority: Int): Boolean =
-            queue.offer(content, priority)
-
-        override fun markContentDelivered(poiId: String) {
-            delivered += poiId
-            queue.markDelivered(poiId)
-        }
-
-        override fun clearContentQueue() = queue.clear()
-
-        override fun generateContent(
-            pointOfInterest: PointOfInterest,
-            userPreferences: UserPreferences
-        ): Flow<ContentService.ContentGenerationResult> =
-            throw UnsupportedOperationException("delivery never generates content")
-
-        override suspend fun getContentForPlace(
-            pointOfInterest: PointOfInterest,
-            userPreferences: UserPreferences
-        ): TourContent = throw UnsupportedOperationException("delivery never fetches content")
-
-        override suspend fun prefetchContent(
-            pointsOfInterest: List<PointOfInterest>,
-            userPreferences: UserPreferences
-        ) = throw UnsupportedOperationException("delivery never prefetches")
-
-        override suspend fun getWayOfLifeContent(
-            regionName: String,
-            location: LatLng,
-            userPreferences: UserPreferences
-        ): TourContent? = throw UnsupportedOperationException("delivery tells places, not regions")
-
-        override suspend fun pruneStoryCache(): Int =
-            throw UnsupportedOperationException("delivery never prunes")
-
-        override suspend fun clearStoryCache() =
-            throw UnsupportedOperationException("delivery never clears the cache")
-    }
-
-    /**
-     * Speaks by script: each call takes the next outcome. A null outcome is an
-     * utterance that ended without finishing — stopped, or flushed by a newer
-     * one — which is what the loop sees when something else takes the audio.
-     */
-    private class FakeAudioService(
-        private val outcomes: MutableList<AudioService.SpeakingStatus?>
-    ) : AudioService {
-        val spoken = mutableListOf<String>()
-
-        override fun speak(text: String): Flow<AudioService.SpeakingStatus> {
-            spoken += text
-            val outcome = if (outcomes.isEmpty()) {
-                AudioService.SpeakingStatus.COMPLETED
-            } else {
-                outcomes.removeAt(0)
-            }
-            return flow {
-                emit(AudioService.SpeakingStatus.STARTED)
-                if (outcome != null) emit(outcome)
-            }
-        }
-
-        override val speechProgress: StateFlow<Float> = MutableStateFlow(0f)
-        override val voiceAvailability: StateFlow<AudioService.VoiceAvailability> =
-            MutableStateFlow(AudioService.VoiceAvailability.READY)
-        override val isPlaying: StateFlow<Boolean> = MutableStateFlow(false)
-
-        override suspend fun initialize(userPreferences: UserPreferences): Boolean = true
-        override fun speak(content: TourContent): Flow<AudioService.SpeakingStatus> =
-            speak(content.content)
-
-        override fun speakPriority(text: String): Flow<AudioService.SpeakingStatus> = speak(text)
-        override fun pause(): Boolean = false
-        override fun resume(): Boolean = false
-        override fun stop() = Unit
-        override fun isSpeaking(): Boolean = false
-        override fun updateVoiceSettings(preferences: UserPreferences) = Unit
-        override fun shutdown() = Unit
-    }
+    // FakeContentService and FakeAudioService live in TourServiceFakes.kt,
+    // shared with WayOfLifeWatcherTest.
 
     /** Records what the service would have shown and stored. */
     private open class RecordingHost(
