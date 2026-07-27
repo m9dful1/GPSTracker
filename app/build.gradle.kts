@@ -35,6 +35,12 @@ val admobBannerAdUnitId: String =
 val admobInterstitialAdUnitId: String =
     localProperties.getProperty("ADMOB_INTERSTITIAL_AD_UNIT_ID") ?: testInterstitialAdUnitId
 
+// UMP test device, for debug builds only: it makes the consent form appear as
+// it would in the EEA. Hashed ids are per-device and printed in logcat by the
+// UMP SDK on first run, so each developer puts their own in local.properties
+// and a clone without one simply doesn't get the forced form.
+val umpTestDeviceHash: String = localProperties.getProperty("UMP_TEST_DEVICE_HASH") ?: ""
+
 // Release signing, from local.properties or the environment — never committed.
 // A clone without the keystore still builds a release APK; it just comes out
 // unsigned, which is what CI wants and the only thing it could do anyway.
@@ -62,6 +68,7 @@ android {
         manifestPlaceholders["ADMOB_APP_ID"] = admobAppId
         buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+        buildConfigField("String", "UMP_TEST_DEVICE_HASH", "\"$umpTestDeviceHash\"")
     }
 
     signingConfigs {

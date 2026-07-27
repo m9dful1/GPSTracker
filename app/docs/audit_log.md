@@ -2234,7 +2234,7 @@ exactly where they are.
 
 ## Tier 3 — housekeeping
 
-### D3 · Every service teardown that never toured logs an error — `TODO`
+### D3 · Every service teardown that never toured logs an error — `DONE`
 
 Mine, from B5. `releaseTourResources` calls `stopProximityMonitoring()`
 unconditionally — which was the point, since the failed tours it exists for
@@ -2251,7 +2251,7 @@ and error-level logs that are routine are how real ones get missed.
 **Fix:** the receiver's registration is state like any other. Track it, and
 unregister only what was registered.
 
-### D4 · A developer's phone is hardcoded in the consent settings — `TODO`
+### D4 · A developer's phone is hardcoded in the consent settings — `DONE`
 
 `ConsentManager.buildConsentRequestParameters` carries
 `addTestDeviceHashedId("38F6DC6...")` under `BuildConfig.DEBUG`. It is one
@@ -2323,3 +2323,38 @@ booleans whose test would restate them. Extracting that to reach a coverage
 number is the thing this audit has refused all the way through; the ads layer's
 remaining code is SDK calls and lifecycle glue, and `AdRetryPolicy` already
 covers the one piece of arithmetic in it. Recorded rather than manufactured.
+
+### D3 and D4 — "Stop shouting about nothing, and stop testing on one phone"
+
+Two pieces of noise, one of them mine.
+
+**D3.** The battery receiver's registration is now state, and only what was
+registered gets unregistered. B5 made `releaseTourResources` unconditional on
+purpose — a tour that *failed* holds exactly as much as one that was stopped —
+and the cost was that a service which starts, receives a control it can't act
+on and stops (A4's `TourCommand.NONE` path) wrote **"Error unregistering
+battery receiver"** on the way out, every time. The release was right; the
+error was an artefact of asking a receiver that had never been registered to go
+away.
+
+The catch that remains is deliberately broad, which is the opposite of what B4
+argued for elsewhere, and the reason is the call site: this runs from the tour
+service's `onDestroy`, where the contract is that teardown does not throw.
+B4's rule was never "narrow everywhere" — it was "catch what the caller's
+contract needs", and here that is everything. It logs at warning now, because
+with the guard in front of it, reaching that catch means something odd rather
+than something wrong.
+
+**D4.** `addTestDeviceHashedId("38F6DC6…")` was one person's phone, written
+into the source. Its purpose is to force the EEA consent form on a development
+device so the flow can be tested outside a consent region — and on every other
+clone it did the exact opposite of that, silently: an id that matches nothing,
+so no form, and no sign anything was meant to happen. It now reads
+`UMP_TEST_DEVICE_HASH` from `local.properties` like the API keys, is skipped
+entirely when blank, and `app/docs/ads.md` says where to find your own (UMP
+prints it to logcat on first run).
+
+No new tests. Both changes are Android-boundary bookkeeping — a `registerReceiver`
+call's state and a build-config string — with no decision to pin down; the one
+piece of this area that *was* a decision is D1's, and it has five. 472 tests, 0
+failures.

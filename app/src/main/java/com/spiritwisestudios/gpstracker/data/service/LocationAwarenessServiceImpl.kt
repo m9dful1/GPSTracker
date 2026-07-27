@@ -50,6 +50,11 @@ class LocationAwarenessServiceImpl @Inject constructor(
     private var locationListener: LocationListenerCompat? = null
     private var isMonitoring = false
 
+    // The battery receiver's own state. Unregistering one that was never
+    // registered throws, and the tour service releases its resources on every
+    // path that ends a tour — including the ones where no tour ever started.
+    private var batteryReceiverRegistered = false
+
     // One alert per place per change: every fix re-measures every place, and
     // an alert costs the tour service a content lookup
     private val alertGate = ProximityAlertGate()
@@ -99,6 +104,7 @@ class LocationAwarenessServiceImpl @Inject constructor(
             batteryReceiver,
             IntentFilter(Intent.ACTION_BATTERY_CHANGED)
         )
+        batteryReceiverRegistered = true
 
         // Get current battery level
         val batteryStatus = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -324,10 +330,18 @@ class LocationAwarenessServiceImpl @Inject constructor(
             locationListener = null
         }
 
-        try {
-            context.unregisterReceiver(batteryReceiver)
-        } catch (e: Exception) {
-            Timber.e(e, "Error unregistering battery receiver")
+        if (batteryReceiverRegistered) {
+            batteryReceiverRegistered = false
+            try {
+                context.unregisterReceiver(batteryReceiver)
+            } catch (e: Exception) {
+                // Broad on purpose, unlike the API services: this runs from
+                // the tour service's onDestroy, where the contract is that
+                // teardown does not throw. A warning, not an error — with the
+                // guard above, reaching here means something genuinely odd,
+                // but nothing anyone can act on.
+                Timber.w(e, "Battery receiver was already unregistered")
+            }
         }
 
         isMonitoring = false

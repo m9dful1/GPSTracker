@@ -24,6 +24,11 @@ Real IDs go in `local.properties` (gitignored, like the other keys):
 ADMOB_APP_ID=ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY
 ADMOB_BANNER_AD_UNIT_ID=ca-app-pub-XXXXXXXXXXXXXXXX/YYYYYYYYYY
 ADMOB_INTERSTITIAL_AD_UNIT_ID=ca-app-pub-XXXXXXXXXXXXXXXX/YYYYYYYYYY
+
+# Optional, debug builds only: forces the EEA consent form on your own
+# device, so the flow can be tested outside a consent region. The UMP SDK
+# prints your device's hashed id to logcat on first run.
+UMP_TEST_DEVICE_HASH=YOUR_DEVICE_HASH
 ```
 
 Register the app and create the two ad units in the

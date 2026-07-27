@@ -156,11 +156,16 @@ object ConsentManager {
         } catch (_: Exception) {
             // UMP falls back to the manifest
         }
-        if (BuildConfig.DEBUG) {
+        // Debug builds can force the EEA consent form, but only for a device
+        // that says so: the hashed id comes from UMP_TEST_DEVICE_HASH in
+        // local.properties. It used to be one developer's phone, written into
+        // the source, which meant every other clone silently got no form at all
+        // — the opposite of what the setting is for.
+        if (BuildConfig.DEBUG && BuildConfig.UMP_TEST_DEVICE_HASH.isNotBlank()) {
             try {
                 val debugSettings = ConsentDebugSettings.Builder(context)
                     .setDebugGeography(ConsentDebugSettings.DebugGeography.DEBUG_GEOGRAPHY_EEA)
-                    .addTestDeviceHashedId("38F6DC6CDE1D3E011A0C461F22312510")
+                    .addTestDeviceHashedId(BuildConfig.UMP_TEST_DEVICE_HASH)
                     .build()
                 builder.setConsentDebugSettings(debugSettings)
             } catch (_: Exception) {
