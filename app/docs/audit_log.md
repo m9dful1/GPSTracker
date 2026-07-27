@@ -1188,7 +1188,7 @@ decisions) and the service's discovery/notification split.
 watcher (its policy is already pure, only the orchestration isn't), then the
 navigation status/instruction handling in `MainActivity`.
 
-### B8 · The dependency and target-SDK upgrade pass — `TODO`
+### B8 · The dependency and target-SDK upgrade pass — `DONE`
 
 Opened by B6, which deliberately left it: after the catalog move and the small
 groups, all 36 remaining lint warnings are version upgrades, and none of them
@@ -1228,6 +1228,34 @@ and what that means for the camera, the card and the voice.
 **Fix:** the same seam as A19 and B7 — a `NavigationPresenter` holding
 `NavState` and the transitions, with a `Host` for the views and the map. The
 activity keeps the view wiring and nothing else about navigation.
+
+### B10 · Everything behind the AGP 9 wall — `TODO`
+
+Opened by B8, which took every upgrade the current toolchain accepts and found
+that the rest are not independent bumps at all — they are one migration wearing
+eleven hats. The 19 warnings that remain:
+
+- **11 blocked by AGP 9 outright.** `androidx.core:core:1.19.0` fails
+  `checkDebugAarMetadata` with "requires Android Gradle plugin 9.1.0 or higher"
+  and compileSdk 37; Hilt's Gradle plugin 2.60.1 refuses to *apply* below AGP
+  9.0.0. Between them that pins core-ktx, activity, lifecycle (x4), Room (x2),
+  datastore and Hilt (x3) at the versions B8 landed.
+- **Room 2.8.4 specifically** also needs a newer kotlinx-serialization than
+  Kotlin 2.1.0's KSP puts on the annotation-processor classpath — it dies with
+  an `AbstractMethodError` inside `FieldBundle$$serializer`.
+- **Kotlin 2.1.0 → 2.4.10**, which drags KSP with it (`ksp` is pinned to the
+  Kotlin version by construction) and is what Room 2.8 is really waiting for.
+- **AGP 8.13.2 → 9.3.1**, the major everything above depends on.
+- **OkHttp 4.12 → 5.4**, the only one that needs *code* changed: `Response.body`
+  is non-null in 5.x and all six API services read `response.body?.string()`.
+- **Three Play Services majors** — maps 19→20, ads 24→25, UMP 3→4 — over the
+  ads and consent flow, which is the part of this app that cannot be verified
+  without a device and a real AdMob account.
+- **`targetSdk` 35 → 36**, still last and still on its own.
+
+**Fix:** AGP 9 and Kotlin 2.4 first, together, because nothing else moves until
+they do. Then the AndroidX and Hilt versions fall out for free. OkHttp 5 and the
+Play Services majors are separate reading each. `targetSdk` last.
 
 ---
 
@@ -1589,3 +1617,70 @@ are now reachable without a foreground service, and 13 of them are pinned. The
 same will be true of B9, which is the second extraction B7 named and which
 still has `MainActivity` at 1521 lines.
 
+### B8 — "Take every upgrade the toolchain allows, and name the wall"
+
+**36 lint warnings → 19**, in four commits, each verified with the full gate
+before the next one started:
+
+| Commit | What moved |
+| --- | --- |
+| `Compile against API 36 and take the AndroidX upgrades AGP 8 allows` | compileSdk 36; core-ktx 1.16.0, activity 1.10.1, lifecycle 2.9.4, datastore 1.1.7, appcompat 1.7.1, constraintlayout 2.2.1, recyclerview 1.4.0 |
+| `Move Room to 2.7.2 and drop the merged room-ktx artifact` | Room 2.6.1 → 2.7.2, one dependency deleted |
+| `Upgrade the third-party libraries the toolchain accepts` | Material 1.14.0, MapLibre 13.4.1, Gson 2.14.0, desugar 2.1.5, coroutines 1.11.0, Hilt 2.57.2 |
+| `Upgrade the test tooling and the Gradle wrapper` | Gradle 8.14.5; ext-junit 1.3.0, Espresso 3.7.0, Mockito 5.23.0, org.json 20260719 |
+
+**The finding that shaped the whole task: most of these are not independent.**
+Bumping each library to what lint asks for fails, and fails informatively:
+`androidx.core:core:1.19.0` requires compileSdk 37 *and AGP 9.1.0*, and Hilt's
+2.60.1 plugin refuses to apply under AGP 8 at all. So eleven of the warnings
+are one migration — AGP 9 plus Kotlin 2.4 — and treating them as eleven bumps
+would have meant eleven failed attempts. They are now **B10**, described as the
+single thing they are.
+
+**compileSdk 36 went in; `targetSdk` stayed at 35.** Worth saying plainly
+because the two get conflated: `compileSdk` is what the code is compiled
+against and changes nothing at runtime, and raising it is what let the AndroidX
+versions move at all. `targetSdk` is what the platform uses to decide how to
+treat the app, and this app runs a foreground location service, posts
+notifications and draws under the system bars.
+
+**Release notes read, not skipped**, for the four upgrades where a break would
+be silent rather than a compile error:
+
+- **lifecycle 2.9** makes `Lifecycle.DESTROYED` terminal — an
+  `IllegalStateException` for anything reusing a destroyed owner. Nothing here
+  does.
+- **activity 1.9–1.10**'s automatic changes (edge-to-edge, predictive back)
+  apply only to apps calling `enableEdgeToEdge()` or registering an
+  `OnBackPressedCallback`. This app does neither; it applies insets by hand.
+- **Room 2.7** merged `room-ktx` into `room-runtime` (so a dependency is gone,
+  not stale) and switched KSP to generating **Kotlin** rather than Java.
+  `AppDatabase_Impl` is a `.kt` file now. The restrictions that come with
+  Kotlin codegen — no nullable collection return types, no abstract properties
+  as DAO getters — are ones the DAOs already satisfied, and **the committed
+  schema JSON came out byte-for-byte identical**, which is the only thing that
+  really matters: A14 exists because those files are what a future migration
+  validates against.
+- **Material 1.13/1.14** put their work into Material 3 Expressive styles and
+  new components. This app's theme extends `Theme.MaterialComponents.DayNight`,
+  the Material 2 line, which got bug fixes and accessibility work. It was the
+  one visual risk in the pass and the one I checked hardest.
+
+**Room 2.8.4 was attempted and rolled back**, not skipped: its compiler
+serialises schema bundles with kotlinx-serialization and throws
+`AbstractMethodError: FieldBundle$$serializer ... typeParametersSerializers()`
+against the runtime Kotlin 2.1.0's KSP supplies. Forcing a newer serialization
+artifact onto the `ksp` configuration would have papered over a toolchain
+mismatch to satisfy a version number, so 2.7.2 is where Room stops until
+Kotlin moves.
+
+Tests: **411, 0 failures**, unchanged — no new ones, and that is the honest
+answer here. A dependency upgrade's test is the existing suite, and this suite
+exercises the parts these libraries touch: Room migrations, the coroutine-heavy
+delivery and filler loops, the DataStore-backed preferences, the org.json
+parsers. `assembleRelease` was run at the end as well, since R8 sees every one
+of these jars.
+
+**What no gate here can see:** the app was not run. Material's rendering,
+MapLibre 13.4's map, the Play Services libraries and anything about how the UI
+looks are unverified by anything but the compiler.
