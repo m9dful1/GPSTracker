@@ -158,9 +158,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)
 
-    // Room database for local caching (using KSP instead of KAPT)
+    // Room database for local caching (using KSP instead of KAPT). room-ktx
+    // merged into room-runtime in 2.7.0, so there is nothing left to declare.
     implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
     // OkHttp: every API service here is hand-rolled against it. Declared
