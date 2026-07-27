@@ -373,8 +373,11 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="24dp">
+            android:layout_marginTop="24dp"
+            tools:ignore="ButtonStyle">
 
+            <!-- A Material filled/outlined pair, not an AlertDialog button
+                 bar: borderless would flatten Save into a link. -->
             <Button
                 android:id="@+id/btn_cancel"
                 style="?attr/materialButtonOutlinedStyle"

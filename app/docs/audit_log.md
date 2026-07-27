@@ -1158,7 +1158,7 @@ run the release unconditionally from `onDestroy` and the error path.
 
 ## Tier 3 — housekeeping
 
-### B6 · Lint's remaining warning groups — `TODO`
+### B6 · Lint's remaining warning groups — `DONE`
 
 Banked from A18. 78 warnings, no errors: 22 `UseTomlInstead` (hardcoded
 dependency coordinates that belong in the version catalog), 22
@@ -1187,6 +1187,31 @@ decisions) and the service's discovery/notification split.
 **Fix:** not one change. The next candidates, in order of value: the way-of-life
 watcher (its policy is already pure, only the orchestration isn't), then the
 navigation status/instruction handling in `MainActivity`.
+
+### B8 · The dependency and target-SDK upgrade pass — `TODO`
+
+Opened by B6, which deliberately left it: after the catalog move and the small
+groups, all 36 remaining lint warnings are version upgrades, and none of them
+is a number to bump without reading something first.
+
+- **21 `GradleDependency` · 12 `NewerVersionAvailable`** — now nearly all on
+  `libs.versions.toml`, one place, which is the point of the move. The
+  interesting ones are not the point releases: OkHttp 4.12 → **5.4** is a major
+  version, Kotlin coroutines 1.7.3 → **1.11** crosses several minors under a
+  Kotlin version this project pins, lifecycle 2.7 → **2.11**, Room 2.6.1 →
+  newer (a Room upgrade regenerates schemas — see A14), Hilt 2.56.2 → 2.60.1
+  (plugin and artifacts move together now).
+- **2 `AndroidGradlePluginVersion`** — Gradle 8.13 → 8.14.5, and AGP 8.13.2 →
+  **9.3.1**, a major with its own migration guide.
+- **1 `OldTargetApi`** — `targetSdk = 35`, latest is 36. This is the one that
+  is *not* housekeeping at all: raising `targetSdk` opts the app into new
+  platform behaviour, and this app runs a foreground location service, posts
+  notifications, and draws over a map with system-bar insets — three of the
+  areas that change most between releases.
+
+**Fix:** one dependency at a time or in small related groups, each with the
+release notes read and the gradle gate run, and `targetSdk` last and on its
+own. Not a single commit.
 
 ---
 
@@ -1423,3 +1448,71 @@ is exactly B7's complaint about that file, and one more reason to do it.
 
 398 tests, 0 failures; `lintDebug` still 0 errors and 78 warnings. Verified by
 reading every caller, not by running a tour on a device.
+
+### B6 — "Clear lint's fixable warnings and move the deps to the catalog"
+
+**78 warnings → 36, still 0 errors.** Everything that remains is a version
+upgrade, which B6 said should be its own pass; that pass is now **B8** rather
+than a loose end.
+
+**The catalog move (22 `UseTomlInstead`).** Every hardcoded coordinate in
+`app/build.gradle.kts` moved to `libs.versions.toml`, and the two plugin
+versions hardcoded in the root build file went with them. Two things fell out
+that make this more than tidying:
+
+- **`hilt = "2.56.2"` is now one version ref** shared by the plugin and both
+  artifacts. They have to match; before, they matched by coincidence in two
+  different files.
+- **appcompat was declared twice and disagreed.** The catalog said 1.7.0, the
+  build file said 1.6.1, and the build file won — which is exactly what lint's
+  message was telling us ("already available as `androidx-appcompat`, but using
+  version 1.6.1"). Using the alias takes 1.7.0. That is a real dependency
+  change and the only version this task moves.
+
+**The small groups.** Each was a genuine fix rather than a suppression, except
+one:
+
+| Warning | What it was | What it is now |
+| --- | --- | --- |
+| `NotifyDataSetChanged` ×2 | two adapters rebuilding every visible row per keystroke | one shared `ListAdapter` with a `DiffUtil` callback |
+| `UnusedResources` ×3 | `R.color.black`/`white` unused; `ic_launcher_round` unreferenced | colors deleted; the manifest now declares `android:roundIcon` |
+| `UseKtx` ×3 | `visibility == VISIBLE`, `Uri.parse`, `Bitmap.createBitmap` | `isVisible`, `String.toUri`, `createBitmap` |
+| `Overdraw` ×2 | list rows painting `selectableItemBackground` as a background | the ripple moved to `android:foreground` |
+| `Autofill` ×2 | two search boxes with no `autofillHints` | `importantForAutofill="no"` — a place search isn't a form field |
+| `RelativeOverlap` | the turn-card title could run under the close button | bounded with `layout_toStartOf` + `ellipsize` |
+| `UseCompoundDrawables` | search bar = LinearLayout + ImageView + TextView | one `TextView` with `app:drawableStartCompat` |
+| `ObsoleteSdkInt` | `SDK_INT >= M` branch, minSdk 24 | branch and its deprecated fallback deleted |
+| `SetTextI18n` | `"$eta • ${…}"` concatenated into `setText` | `navigation_eta_and_distance` string resource |
+| `RtlEnabled` | manifest never declared RTL either way | `android:supportsRtl="true"` |
+| `ButtonOrder` | nav card had Start \| Cancel | Cancel \| Start |
+| `ButtonStyle` ×2 | wants borderless button-bar buttons | **suppressed**, with the reason in the layout |
+
+Three of those deserve more than a table row:
+
+- **The two search adapters were byte-identical**, class name aside — same item
+  layout, same holder, same binding, same `notifyDataSetChanged`. So the fix
+  for the lint warning and the fix for the duplication are the same edit: one
+  `SearchResultAdapter` in `ui/adapter/`, used by both sheets. `ListAdapter`
+  also means a refined query keeps the rows it already had instead of rebinding
+  the visible list on every response, which is the difference between a list
+  that settles and a list that flickers while you type.
+- **`ButtonStyle` is the one I refused.** Lint wants
+  `?android:attr/buttonBarButtonStyle` on the second button of each pair. These
+  are Material filled/outlined pairs, not AlertDialog button bars — borderless
+  would leave "Start Navigation" and "Save" looking like links. Suppressed at
+  the container with the reasoning written next to it, which is the honest form
+  of "lint is wrong here".
+- **`ButtonOrder` is the one that changes what the user sees.** Lint is right
+  and the app was already inconsistent with itself: the settings sheet had
+  Cancel on the left, the navigation card had it on the right. They agree now,
+  and they agree with the platform.
+
+`assembleRelease` was run as well as the usual gate, because this task touched
+resources under `isShrinkResources` and changed a dependency version: R8 and
+the resource shrinker both still pass. 398 tests, 0 failures.
+
+**Untested by anything but the compiler:** every layout change. No unit test can
+see a compound drawable render or a ripple draw in a foreground, and I haven't
+run a device. The riskiest of them is the search bar — it went from three views
+to one, and `app:drawableStartCompat` relies on the activity inflating that
+`TextView` as an `AppCompatTextView`, which an `AppCompatActivity` does.

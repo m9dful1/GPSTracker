@@ -5,7 +5,6 @@ import android.content.ComponentName
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.Configuration
-import android.net.Uri
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.location.Location
@@ -24,7 +23,9 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
 import androidx.core.app.ActivityCompat
+import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
+import androidx.core.view.isVisible
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.Observer
@@ -601,7 +602,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         card.animate().cancel()
 
         if (narration == null) {
-            if (card.visibility == View.VISIBLE) {
+            if (card.isVisible) {
                 card.animate()
                     .translationY(card.height.toFloat())
                     .alpha(0f)
@@ -637,7 +638,7 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         binding.tvNarrationSource.setOnClickListener {
             sourceUrl?.let { url ->
                 try {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
                 } catch (e: ActivityNotFoundException) {
                     Toast.makeText(this, R.string.no_browser_available, Toast.LENGTH_SHORT).show()
                 }
@@ -1355,7 +1356,11 @@ class MainActivity : AppCompatActivity(), MapController.Host,
         } else {
             getString(R.string.route_to, destinationName)
         }
-        tvNavigationInfo.text = "$etaText • ${getString(R.string.distance_remaining, distanceText)}"
+        tvNavigationInfo.text = getString(
+            R.string.navigation_eta_and_distance,
+            etaText,
+            getString(R.string.distance_remaining, distanceText)
+        )
         // Update ETA progress bar roughly based on time remaining
         val remaining = status.timeRemaining
         binding.progressEta.progress = when {

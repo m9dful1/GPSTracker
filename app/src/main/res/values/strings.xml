@@ -63,6 +63,9 @@
     <string name="eta_calculating">Calculating ETA…</string>
     <string name="eta_format">ETA: %1$s</string>
     <string name="distance_remaining">%1$s remaining</string>
+    <!-- ETA and distance on one line; the separator is part of the
+         translation because not every locale sets clauses apart this way -->
+    <string name="navigation_eta_and_distance">%1$s • %2$s</string>
     <string name="calculating_route">Calculating route…</string>
     <string name="start_navigation">Start Navigation</string>
     <string name="end_navigation">End Navigation</string>

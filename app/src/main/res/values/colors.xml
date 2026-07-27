@@ -1,8 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
-
     <!-- Brand palette: deep teal with a matching light variant for dark
          theme (values-night/colors.xml overrides these). -->
     <color name="brand_primary">#00695C</color>

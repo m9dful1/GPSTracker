@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import androidx.core.graphics.createBitmap
 import org.maplibre.android.annotations.Icon
 import org.maplibre.android.annotations.IconFactory
 
@@ -31,7 +32,7 @@ object MarkerIcons {
         val density = context.resources.displayMetrics.density
         val width = (26 * density).toInt()
         val height = (38 * density).toInt()
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val bitmap = createBitmap(width, height)
         val canvas = Canvas(bitmap)
 
         val alphaChannel = (alpha.coerceIn(0f, 1f) * 255).toInt()

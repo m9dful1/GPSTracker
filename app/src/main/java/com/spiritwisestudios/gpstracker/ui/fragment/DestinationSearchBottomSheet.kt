@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.TextView
 import androidx.core.widget.doAfterTextChanged
+import com.spiritwisestudios.gpstracker.ui.adapter.SearchResultAdapter
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -70,7 +71,7 @@ class DestinationSearchBottomSheet : BottomSheetDialogFragment() {
 
             if (query.length < MIN_QUERY_LENGTH) {
                 statusText.visibility = View.GONE
-                adapter.submit(emptyList())
+                adapter.submitList(emptyList())
                 return@doAfterTextChanged
             }
 
@@ -80,7 +81,7 @@ class DestinationSearchBottomSheet : BottomSheetDialogFragment() {
 
                 statusText.visibility = if (results.isEmpty()) View.VISIBLE else View.GONE
                 statusText.text = getString(R.string.search_no_results, query)
-                adapter.submit(results)
+                adapter.submitList(results)
             }
         }
 
@@ -90,40 +91,6 @@ class DestinationSearchBottomSheet : BottomSheetDialogFragment() {
     override fun onDestroyView() {
         searchJob?.cancel()
         super.onDestroyView()
-    }
-
-    private class SearchResultAdapter(
-        private val onClick: (GeocodingApi.SearchResult) -> Unit
-    ) : RecyclerView.Adapter<SearchResultAdapter.Holder>() {
-
-        private val results = mutableListOf<GeocodingApi.SearchResult>()
-
-        fun submit(newResults: List<GeocodingApi.SearchResult>) {
-            results.clear()
-            results.addAll(newResults)
-            notifyDataSetChanged()
-        }
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
-            val view = LayoutInflater.from(parent.context)
-                .inflate(R.layout.item_search_result, parent, false)
-            return Holder(view)
-        }
-
-        override fun getItemCount(): Int = results.size
-
-        override fun onBindViewHolder(holder: Holder, position: Int) {
-            val result = results[position]
-            holder.name.text = result.name
-            holder.detail.text = result.detail
-            holder.detail.visibility = if (result.detail.isBlank()) View.GONE else View.VISIBLE
-            holder.itemView.setOnClickListener { onClick(result) }
-        }
-
-        class Holder(view: View) : RecyclerView.ViewHolder(view) {
-            val name: TextView = view.findViewById(R.id.tv_result_name)
-            val detail: TextView = view.findViewById(R.id.tv_result_detail)
-        }
     }
 
     companion object {

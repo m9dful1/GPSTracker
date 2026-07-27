@@ -22,13 +22,19 @@
             android:paddingEnd="8dp"
             android:paddingTop="8dp">
 
+            <!-- Bounded by the close button: a longer translation of the
+                 title used to run underneath it -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_alignParentStart="true"
+                android:layout_centerVertical="true"
+                android:layout_toStartOf="@id/btn_close_turn_instruction"
+                android:ellipsize="end"
+                android:maxLines="1"
                 android:text="@string/turn_by_turn_title"
                 android:textSize="14sp"
-                android:textStyle="bold"
-                android:layout_centerVertical="true" />
+                android:textStyle="bold" />
 
             <ImageButton
                 android:id="@+id/btn_close_turn_instruction"

@@ -20,6 +20,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.button.MaterialButton
 import com.spiritwisestudios.gpstracker.R
+import com.spiritwisestudios.gpstracker.ui.adapter.SearchResultAdapter
 import com.spiritwisestudios.gpstracker.data.api.GeocodingApi
 import com.spiritwisestudios.gpstracker.domain.model.LatLng
 import com.spiritwisestudios.gpstracker.domain.model.TourFocus
@@ -141,7 +142,7 @@ class TakeATourBottomSheet : BottomSheetDialogFragment() {
 
     /** Type 3+ characters to find any city in the world; tapping one picks it. */
     private fun setupCitySearch(here: LatLng?) {
-        val adapter = CityResultAdapter { result ->
+        val adapter = SearchResultAdapter { result ->
             addStartOption(StartOption(result.name, result.latLng), select = true)
             citySearch.setText("")
             cityResults.visibility = View.GONE
@@ -155,14 +156,14 @@ class TakeATourBottomSheet : BottomSheetDialogFragment() {
 
             if (query.length < MIN_QUERY_LENGTH) {
                 cityResults.visibility = View.GONE
-                adapter.submit(emptyList())
+                adapter.submitList(emptyList())
                 return@doAfterTextChanged
             }
 
             searchJob = viewLifecycleOwner.lifecycleScope.launch {
                 delay(SEARCH_DEBOUNCE_MS)
                 val results = geocodingApi.search(query, here, MAX_CITY_RESULTS)
-                adapter.submit(results)
+                adapter.submitList(results)
                 cityResults.visibility = if (results.isEmpty()) View.GONE else View.VISIBLE
             }
         }
@@ -238,40 +239,6 @@ class TakeATourBottomSheet : BottomSheetDialogFragment() {
     override fun onDestroyView() {
         searchJob?.cancel()
         super.onDestroyView()
-    }
-
-    private class CityResultAdapter(
-        private val onClick: (GeocodingApi.SearchResult) -> Unit
-    ) : RecyclerView.Adapter<CityResultAdapter.Holder>() {
-
-        private val results = mutableListOf<GeocodingApi.SearchResult>()
-
-        fun submit(newResults: List<GeocodingApi.SearchResult>) {
-            results.clear()
-            results.addAll(newResults)
-            notifyDataSetChanged()
-        }
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
-            val view = LayoutInflater.from(parent.context)
-                .inflate(R.layout.item_search_result, parent, false)
-            return Holder(view)
-        }
-
-        override fun getItemCount(): Int = results.size
-
-        override fun onBindViewHolder(holder: Holder, position: Int) {
-            val result = results[position]
-            holder.name.text = result.name
-            holder.detail.text = result.detail
-            holder.detail.visibility = if (result.detail.isBlank()) View.GONE else View.VISIBLE
-            holder.itemView.setOnClickListener { onClick(result) }
-        }
-
-        class Holder(view: View) : RecyclerView.ViewHolder(view) {
-            val name: TextView = view.findViewById(R.id.tv_result_name)
-            val detail: TextView = view.findViewById(R.id.tv_result_detail)
-        }
     }
 
     companion object {

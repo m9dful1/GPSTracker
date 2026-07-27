@@ -18,6 +18,7 @@
         android:layout_marginTop="12dp"
         android:hint="@string/search_places_hint"
         android:imeOptions="actionSearch"
+        android:importantForAutofill="no"
         android:inputType="text"
         android:maxLines="1"
         android:minHeight="48dp" />
