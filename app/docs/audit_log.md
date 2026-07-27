@@ -1903,7 +1903,7 @@ bookkeeping into a pure class with the engine behind a small interface
 (`speak(id, text)`, `stop()`, focus request/abandon), and write the
 interleavings down as tests — starting with the one in C1.
 
-### C3 · Room's destructive-migration escape hatch is deprecated — `TODO`
+### C3 · Room's destructive-migration escape hatch is deprecated — `DONE`
 
 `AppDatabase` calls `.fallbackToDestructiveMigrationFrom(1)`, and Room 2.8
 deprecates it in favour of an overload that makes you say whether *all* tables
@@ -2035,3 +2035,31 @@ warning in this file. It guards against resuming into a collector that has gone
 away, and the race it admits — the channel closing between the check and the
 resume — ends with an utterance nobody hears rather than a wedged tour. Worth
 knowing about; not worth a lock held across a TTS call.
+
+### C3 — "Say out loud that a rebuilt version is rebuilt"
+
+`.fallbackToDestructiveMigrationFrom(1)` became
+`.fallbackToDestructiveMigrationFrom(dropAllTables = true, 1)`.
+
+**`true` is not the default-looking answer, it is the argued one.** The newer
+overload exists because the old call drops only the tables Room knows about
+*today*. Version 1 is rebuilt precisely because there is no exported schema for
+it — no record of what it contained — so a rebuild that left unrecognised
+tables standing would carry that unknown forward into a database the app
+believes it understands. Rebuilt means rebuilt. Room recommends `true` for the
+same reason.
+
+**The literal `1` stays a literal, deliberately.** It would read better as
+`AppMigrations.FIRST_MIGRATABLE_VERSION - 1`, and that would be worse: raising
+that constant abandons another version's journal, and wiring the fallback to
+follow it would make that happen silently on someone else's edit. The whole
+posture of A14 is that losing the journal should be loud.
+
+So the coupling is pinned instead of automated: a new test asserts
+`FIRST_MIGRATABLE_VERSION` is still 2, and fails with the instruction to update
+`AppDatabase` **and be sure abandoning that version's journal is what you
+mean**. An invisible relationship between two files became a red build.
+
+Tests: 1 new case (452 total, 0 failures). The builder call itself still cannot
+be unit-tested — it needs a real database file and an instrumented test — so
+what is testable is the relationship, and that is what got tested.

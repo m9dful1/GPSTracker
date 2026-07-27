@@ -51,6 +51,22 @@ class AppMigrationsTest {
     }
 
     @Test
+    fun `the destructive fallback still covers exactly the versions below the chain`() {
+        // AppDatabase passes a literal 1 to fallbackToDestructiveMigrationFrom
+        // rather than deriving it from this constant, and deliberately so:
+        // raising FIRST_MIGRATABLE_VERSION abandons another version's journal,
+        // which should be a decision somebody makes twice, not something that
+        // follows a constant silently. This is the second place.
+        assertEquals(
+            "FIRST_MIGRATABLE_VERSION changed — update the destructive fallback in " +
+                "AppDatabase to match, and be sure that abandoning that version's " +
+                "journal is what you mean",
+            2,
+            AppMigrations.FIRST_MIGRATABLE_VERSION
+        )
+    }
+
+    @Test
     fun `nothing older than the first migratable version is claimed`() {
         // Version 1 has no exported schema, so no migration can start there —
         // AppDatabase rebuilds that one instead.

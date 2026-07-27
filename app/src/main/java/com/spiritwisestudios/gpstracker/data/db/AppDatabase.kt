@@ -49,7 +49,15 @@ abstract class AppDatabase : RoomDatabase() {
                     // allowed to be rebuilt. Every later one must migrate, and
                     // a missing migration now fails loudly instead of silently
                     // deleting the journal.
-                    .fallbackToDestructiveMigrationFrom(1)
+                    //
+                    // dropAllTables = true is the whole point of the newer
+                    // overload, and the right answer here for the same reason
+                    // version 1 is rebuilt at all: with no exported schema
+                    // there is no record of what that version contained, so a
+                    // rebuild that dropped only the tables Room knows about
+                    // today could leave something from then behind. Rebuilt
+                    // means rebuilt.
+                    .fallbackToDestructiveMigrationFrom(dropAllTables = true, 1)
                     // One file, no write-ahead log: this database is backed up
                     // and restored (see res/xml/data_extraction_rules.xml), and
                     // a .db copied without its -wal loses whatever the log
